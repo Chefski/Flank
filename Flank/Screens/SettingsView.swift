@@ -11,17 +11,24 @@ import BetterSafariView
 struct SettingsView: View {
     @State private var showTermsOfService = false
     @State private var showPrivacyPolicy = false
+    @State private var showAboutView = false
     
     @State private var showAlert = false
     @State private var alertMessage = ""
-
+    
     var body: some View {
         NavigationStack {
             List {
                 Section(header: Text("Info"), footer: Text("General app information")) {
-                    NavigationLink(destination: AboutView()) {
+                    //                    NavigationLink(destination: AboutView()) {
+                    //                        Label("About", systemImage: "info.circle")
+                    //                    }
+                    Button(action: {
+                        showAboutView = true
+                    }) {
                         Label("About", systemImage: "info.circle")
                     }
+                    .sheet(isPresented: $showAboutView, content: { AboutView() })
                     Button(action: {
                         showTermsOfService = true
                     }) {
@@ -73,7 +80,7 @@ struct SettingsView: View {
     }
     
     private func openMail() {
-        let email = "p.chefski@proton.me"
+        let email = "p.szewski@proton.me"
         let subject = "Contact from Flank app"
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
         let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"

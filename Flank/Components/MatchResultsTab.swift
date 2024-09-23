@@ -39,7 +39,7 @@ struct MatchResultsTab: View {
                     .font(.system(size: 15, weight: .bold))
                     .frame(width: 24, height: 24)
                     .padding(3)
-//                    .background(.white.opacity(0.1))
+                //                    .background(.white.opacity(0.1))
                     .background(Int(match.score1) ?? 0 > Int(match.score2) ?? 0 ? .green.opacity(0.7) : .red.opacity(0.4))
                     .cornerRadius(49)
                     .overlay(
@@ -56,7 +56,7 @@ struct MatchResultsTab: View {
                     .font(.system(size: 15, weight: .bold))
                     .frame(width: 24, height: 24)
                     .padding(3)
-//                    .background(.white.opacity(0.1))
+                //                    .background(.white.opacity(0.1))
                     .background(Int(match.score1) ?? 0 < Int(match.score2) ?? 0 ? .green.opacity(0.7) : .red.opacity(0.4))
                     .cornerRadius(49)
                     .overlay(

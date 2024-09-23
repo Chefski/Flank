@@ -31,7 +31,7 @@ struct NewsView: View {
                 }
             }
             .navigationBarTitle("News")
-//            .background(Color(red: 0.13, green: 0.12, blue: 0.11))
+            //            .background(Color(red: 0.13, green: 0.12, blue: 0.11))
         }
         .refreshable {
             await fetchNews()

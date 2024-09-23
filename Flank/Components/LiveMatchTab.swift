@@ -122,6 +122,7 @@ struct LiveMatchTab: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 25)
                     .padding(.vertical, 7)
+                    .background(.white.opacity(0.25))
                     .background(.ultraThickMaterial)
                     .cornerRadius(40)
                     .sheet(isPresented: $presentingSafariView) {

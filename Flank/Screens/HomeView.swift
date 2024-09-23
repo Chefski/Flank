@@ -16,21 +16,21 @@ struct HomeView: View {
     @ObservedObject var upcomingMatches = ShowUpcoming()
     @ObservedObject var liveMatches = ShowLive()
     
-//    @State private var showWhatsNew = false
-//    
-//    @State var whatsNew: WhatsNew? = WhatsNew(
-//        title: "What's new?",
-//        features: [
-//            .init(
-//                image: .init(
-//                    systemName: "envelope.fill",
-//                    foregroundColor: .orange
-//                ),
-//                title: "Contact via email",
-//                subtitle: "You can now get in contact quickly"
-//            ),
-//        ]
-//    )
+    //    @State private var showWhatsNew = false
+    //    
+    //    @State var whatsNew: WhatsNew? = WhatsNew(
+    //        title: "What's new?",
+    //        features: [
+    //            .init(
+    //                image: .init(
+    //                    systemName: "envelope.fill",
+    //                    foregroundColor: .orange
+    //                ),
+    //                title: "Contact via email",
+    //                subtitle: "You can now get in contact quickly"
+    //            ),
+    //        ]
+    //    )
     
     var body: some View {
         NavigationStack {
@@ -111,26 +111,26 @@ struct HomeView: View {
                     await self.upcomingMatches.fetch()
                     await self.pastResults.fetch()
                     
-//                    checkAndShowWhatsNew()
+                    //                    checkAndShowWhatsNew()
                 }
             }
-//            .sheet(isPresented: $showWhatsNew) {
-//                WhatsNewView(whatsNew: whatsNew!)
-//            }
+            //            .sheet(isPresented: $showWhatsNew) {
+            //                WhatsNewView(whatsNew: whatsNew!)
+            //            }
             .navigationTitle("Matches")
-//            .background(Color(red: 0.13, green: 0.12, blue: 0.11))
+            //            .background(Color(red: 0.13, green: 0.12, blue: 0.11))
         }
     }
     
-//    private func checkAndShowWhatsNew() {
-//        let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-//        let lastVersionPrompted = UserDefaults.standard.string(forKey: "LastWhatsNewVersion")
-//        
-//        if lastVersionPrompted != currentVersion {
-//            showWhatsNew = true
-//            UserDefaults.standard.set(currentVersion, forKey: "LastWhatsNewVersion")
-//        }
-//    }
+    //    private func checkAndShowWhatsNew() {
+    //        let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+    //        let lastVersionPrompted = UserDefaults.standard.string(forKey: "LastWhatsNewVersion")
+    //        
+    //        if lastVersionPrompted != currentVersion {
+    //            showWhatsNew = true
+    //            UserDefaults.standard.set(currentVersion, forKey: "LastWhatsNewVersion")
+    //        }
+    //    }
 }
 
 

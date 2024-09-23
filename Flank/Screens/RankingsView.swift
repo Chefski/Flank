@@ -264,15 +264,15 @@ struct RankingsView: View {
                     
                 }
                 .transition(
-                                    .asymmetric(
-                                        insertion: .push(from: .top),
-                                        removal: .push(from: .bottom)
-                                    )
-                                )
+                    .asymmetric(
+                        insertion: .push(from: .top),
+                        removal: .push(from: .bottom)
+                    )
+                )
             }
             
             ScrollView(showsIndicators: false) {
-                                if isLoading {
+                if isLoading {
                     ProgressView()
                         .padding()
                 } else {
@@ -286,7 +286,7 @@ struct RankingsView: View {
                 }
             }
             .navigationTitle("Rankings")
-//            .background(Color(red: 0.13, green: 0.12, blue: 0.11))
+            //            .background(Color(red: 0.13, green: 0.12, blue: 0.11))
         }
         .onAppear {
             fetchRankings()

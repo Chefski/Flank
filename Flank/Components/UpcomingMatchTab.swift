@@ -19,7 +19,7 @@ struct UpcomingMatchTab: View {
     @State private var presentingSafariView = false
     @State private var showingCalendarAlert = false
     @State private var calendarAlertMessage = ""
-
+    
     var body: some View {
         VStack(spacing: 0) {
             LazyVStack {

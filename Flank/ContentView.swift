@@ -18,32 +18,32 @@ struct ContentView: View {
     }
     
     var body: some View {
-            TabView(selection: $selectedTab) {
-                HomeView()
-                    .tabItem {
-                        Label(NSLocalizedString("nav_matches", comment: ""), systemImage: "gamecontroller.fill")
-                    }
-                    .tag(Tab.matches)
-                RankingsView()
-                    .tabItem {
-                        Label(NSLocalizedString("nav_rankings", comment: ""), systemImage: "medal.fill")
-                    }
-                    .tag(Tab.rankings)
-                
-                NewsView()
-                    .tabItem {
-                        Label(NSLocalizedString("nav_news", comment: ""), systemImage: "newspaper.fill")
-                    }
-                    .tag(Tab.news)
-                
-                
-                SettingsView()
-                    .tabItem {
-                        Label(NSLocalizedString("nav_settings", comment: ""), systemImage: "gearshape.2.fill")
-                    }
-                    .tag(Tab.settings)
-            }
-            .accentColor(.white)
+        TabView(selection: $selectedTab) {
+            HomeView()
+                .tabItem {
+                    Label(NSLocalizedString("nav_matches", comment: ""), systemImage: "gamecontroller.fill")
+                }
+                .tag(Tab.matches)
+            RankingsView()
+                .tabItem {
+                    Label(NSLocalizedString("nav_rankings", comment: ""), systemImage: "medal.fill")
+                }
+                .tag(Tab.rankings)
+            
+            NewsView()
+                .tabItem {
+                    Label(NSLocalizedString("nav_news", comment: ""), systemImage: "newspaper.fill")
+                }
+                .tag(Tab.news)
+            
+            
+            SettingsView()
+                .tabItem {
+                    Label(NSLocalizedString("nav_settings", comment: ""), systemImage: "gearshape.2.fill")
+                }
+                .tag(Tab.settings)
+        }
+        .accentColor(.white)
     }
 }
 
