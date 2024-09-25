@@ -13,9 +13,11 @@ struct RankingsTab: View {
     @State private var isSheetPresented = false
     
     let team: Rankings
+    let searchText: String
     
-    init(team: Rankings) {
+    init(team: Rankings, searchText: String) {
         self.team = team
+        self.searchText = searchText
     }
     
     var body: some View {
@@ -56,7 +58,6 @@ struct RankingsTab: View {
             RoundedRectangle(cornerRadius: 20)
                 .inset(by: 0.5)
                 .stroke(.white.opacity(0.2), lineWidth: 1)
-            
         )
         .onTapGesture {
             self.isSheetPresented = true
@@ -151,7 +152,6 @@ extension UIColor {
     }
 }
 
-
 struct RankingsTab_Preview: PreviewProvider {
     static var previews: some View {
         let team = Rankings(
@@ -166,7 +166,7 @@ struct RankingsTab_Preview: PreviewProvider {
             logo: "//owcdn.net/img/62875027c8e06.png"
         )
         
-        return RankingsTab(team: team)
+        return RankingsTab(team: team, searchText: "")
     }
 }
 
