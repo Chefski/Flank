@@ -13,6 +13,7 @@ struct RankingsView: View {
     @State private var isLoading = false
     
     @State private var showingRegionPicker = true
+    @State private var searchText = ""
     
     var body: some View {
         NavigationStack {
@@ -277,19 +278,27 @@ struct RankingsView: View {
                         .padding()
                 } else {
                     LazyVStack {
-                        ForEach(rankings.rankings, id: \.self) { ranking in
-                            RankingsTab(team: ranking)
+                        ForEach(filteredRankings, id: \.self) { ranking in
+                            RankingsTab(team: ranking, searchText: searchText)
                         }
                     }
                     .padding(.horizontal, 8)
                     .padding(.top)
                 }
             }
+            .searchable(text: $searchText, prompt: "Search for a team")
             .navigationTitle("Rankings")
-            //            .background(Color(red: 0.13, green: 0.12, blue: 0.11))
         }
         .onAppear {
             fetchRankings()
+        }
+    }
+    
+    private var filteredRankings: [Rankings] {
+        if searchText.isEmpty {
+            return rankings.rankings
+        } else {
+            return rankings.rankings.filter { $0.team.localizedCaseInsensitiveContains(searchText) }
         }
     }
     
