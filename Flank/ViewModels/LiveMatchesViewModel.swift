@@ -23,6 +23,8 @@ struct LiveMatch: Hashable, Codable {
     let flag2: String
     let score1: String
     let score2: String
+    let team1_logo: String
+    let team2_logo: String
     let team1_round_ct: String
     let team1_round_t: String
     let team2_round_ct: String
