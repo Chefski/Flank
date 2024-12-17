@@ -1,7 +1,7 @@
 # Flank
 
 <p align="center">
-  <img src="/Users/chefski/Documents/dev/Flank/Flank/Assets.xcassets/AppIcon.appiconset/FlankLogo.png" width="120" alt="Flank Logo">
+  <img src=".github/Images/logo.PNG" width="160" alt="Flank Logo">
 </p>
 
 <p align="center">
