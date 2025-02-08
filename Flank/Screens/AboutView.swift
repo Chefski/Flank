@@ -10,6 +10,7 @@ import LookingGlassUI
 import BetterSafariView
 
 struct AboutView: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var vlrggSite = false
     
     var body: some View {
@@ -65,6 +66,21 @@ struct AboutView: View {
             }
             .padding()
             .navigationTitle("About")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .foregroundColor(.black)
+                            .padding(6)
+                            .background(
+                                Circle()
+                                    .fill(.white)
+                            )
+                    }
+                }
+            }
             .motionManager(updateInterval: 0.1, disabled: false)
         }
     }

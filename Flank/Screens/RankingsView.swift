@@ -36,8 +36,12 @@ struct RankingsView: View {
                             }
                             .padding(.horizontal, 21)
                             .padding(.vertical, 8)
-                            .background(selectedRegion == "na" ? Color.white.opacity(0.3) : Color.white.opacity(0.12))
-                            .cornerRadius(10)
+                            .background(
+    selectedRegion == "na" ? Color(red: 0.05, green: 0.7, blue: 0.59).opacity(0.3) : Color.white.opacity(0.12)
+)
+.cornerRadius(10)
+.animation(.easeInOut(duration: 0.3), value: selectedRegion)
+
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .inset(by: 0.5)
@@ -60,8 +64,9 @@ struct RankingsView: View {
                             }
                             .padding(.horizontal, 21)
                             .padding(.vertical, 8)
-                            .background(selectedRegion == "eu" ? Color.white.opacity(0.3) : Color.white.opacity(0.12))
+                            .background(selectedRegion == "eu" ? Color(red: 0.83, green: 1, blue: 0.12).opacity(0.3) : Color.white.opacity(0.12))
                             .cornerRadius(10)
+                            .animation(.easeInOut(duration: 0.3), value: selectedRegion)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .inset(by: 0.5)
@@ -84,8 +89,9 @@ struct RankingsView: View {
                             }
                             .padding(.horizontal, 21)
                             .padding(.vertical, 8)
-                            .background(selectedRegion == "br" ? Color.white.opacity(0.3) : Color.white.opacity(0.12))
+                            .background(selectedRegion == "br" ? Color(red: 1, green: 0.34, blue: 0.05).opacity(0.3) : Color.white.opacity(0.12))
                             .cornerRadius(10)
+                            .animation(.easeInOut(duration: 0.3), value: selectedRegion)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .inset(by: 0.5)
@@ -108,8 +114,9 @@ struct RankingsView: View {
                             }
                             .padding(.horizontal, 21)
                             .padding(.vertical, 8)
-                            .background(selectedRegion == "ap" ? Color.white.opacity(0.3) : Color.white.opacity(0.12))
+                            .background(selectedRegion == "ap" ? Color(red: 0, green: 0.82, blue: 0.84).opacity(0.3) : Color.white.opacity(0.12))
                             .cornerRadius(10)
+                            .animation(.easeInOut(duration: 0.3), value: selectedRegion)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .inset(by: 0.5)
@@ -132,8 +139,9 @@ struct RankingsView: View {
                             }
                             .padding(.horizontal, 21)
                             .padding(.vertical, 8)
-                            .background(selectedRegion == "la-s" ? Color.white.opacity(0.3) : Color.white.opacity(0.12))
+                            .background(selectedRegion == "la-s" ? Color(red: 1, green: 0.34, blue: 0.05).opacity(0.3) : Color.white.opacity(0.12))
                             .cornerRadius(10)
+                            .animation(.easeInOut(duration: 0.3), value: selectedRegion)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .inset(by: 0.5)
@@ -156,8 +164,9 @@ struct RankingsView: View {
                             }
                             .padding(.horizontal, 21)
                             .padding(.vertical, 8)
-                            .background(selectedRegion == "kr" ? Color.white.opacity(0.3) : Color.white.opacity(0.12))
+                            .background(selectedRegion == "kr" ? Color(red: 0, green: 0.82, blue: 0.84).opacity(0.3) : Color.white.opacity(0.12))
                             .cornerRadius(10)
+                            .animation(.easeInOut(duration: 0.3), value: selectedRegion)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .inset(by: 0.5)
@@ -180,8 +189,9 @@ struct RankingsView: View {
                             }
                             .padding(.horizontal, 21)
                             .padding(.vertical, 8)
-                            .background(selectedRegion == "cn" ? Color.white.opacity(0.3) : Color.white.opacity(0.12))
+                            .background(selectedRegion == "cn" ? Color(red: 0.91, green: 0.19, blue: 0.34).opacity(0.3) : Color.white.opacity(0.12))
                             .cornerRadius(10)
+                            .animation(.easeInOut(duration: 0.3), value: selectedRegion)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .inset(by: 0.5)
@@ -204,8 +214,9 @@ struct RankingsView: View {
                             }
                             .padding(.horizontal, 21)
                             .padding(.vertical, 8)
-                            .background(selectedRegion == "gc" ? Color.white.opacity(0.3) : Color.white.opacity(0.12))
+                            .background(selectedRegion == "gc" ? Color(red: 0.88, green: 0.59, blue: 0).opacity(0.3) : Color.white.opacity(0.12))
                             .cornerRadius(10)
+                            .animation(.easeInOut(duration: 0.3), value: selectedRegion)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .inset(by: 0.5)
@@ -228,8 +239,9 @@ struct RankingsView: View {
                             }
                             .padding(.horizontal, 21)
                             .padding(.vertical, 8)
-                            .background(selectedRegion == "la-n" ? Color.white.opacity(0.3) : Color.white.opacity(0.12))
+                            .background(selectedRegion == "la-n" ? Color(red: 0.05, green: 0.7, blue: 0.59).opacity(0.3) : Color.white.opacity(0.12))
                             .cornerRadius(10)
+                            .animation(.easeInOut(duration: 0.3), value: selectedRegion)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .inset(by: 0.5)
@@ -252,8 +264,9 @@ struct RankingsView: View {
                             }
                             .padding(.horizontal, 21)
                             .padding(.vertical, 8)
-                            .background(selectedRegion == "mn" ? Color.white.opacity(0.3) : Color.white.opacity(0.12))
+                            .background(selectedRegion == "mn" ? Color(red: 1, green: 0.75, blue: 0.24).opacity(0.3) : Color.white.opacity(0.12))
                             .cornerRadius(10)
+                            .animation(.easeInOut(duration: 0.3), value: selectedRegion)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .inset(by: 0.5)

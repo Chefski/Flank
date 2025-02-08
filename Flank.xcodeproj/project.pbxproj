@@ -36,6 +36,7 @@
 		47C02EEF2C298D0D00A093B3 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 47C02EEE2C298D0D00A093B3 /* Localizable.xcstrings */; };
 		47D203632C596082008C33BA /* FlagEmojis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D203622C596082008C33BA /* FlagEmojis.swift */; };
 		47E1282E2BDFE6B3008A1825 /* ColorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 47E1282D2BDFE6B3008A1825 /* ColorKit */; };
+		47F0C5062D515B06000F1986 /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F0C5052D515B06000F1986 /* StatsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -63,6 +64,7 @@
 		47C02EEE2C298D0D00A093B3 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		47D203622C596082008C33BA /* FlagEmojis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlagEmojis.swift; sourceTree = "<group>"; };
 		47EBE1A72BDAE89700EA2081 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		47F0C5052D515B06000F1986 /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
 		47F209D12C5EB83D0016B8A5 /* Flank.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Flank.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -160,6 +162,7 @@
 				47AF05E02BD6B55100DC4128 /* HomeView.swift */,
 				473464352BD7E5E2003827BB /* RankingsView.swift */,
 				471D787C2BDBD5520049641E /* AboutView.swift */,
+				47F0C5052D515B06000F1986 /* StatsView.swift */,
 			);
 			path = Screens;
 			sourceTree = "<group>";
@@ -270,6 +273,7 @@
 				4774E5022BD6A1BC009D9E4C /* FlankApp.swift in Sources */,
 				4774E52A2BD6A2D3009D9E4C /* UpcomingMatchesViewModel.swift in Sources */,
 				4774E5312BD6A404009D9E4C /* LiveMatchTab.swift in Sources */,
+				47F0C5062D515B06000F1986 /* StatsView.swift in Sources */,
 				4774E5352BD6A445009D9E4C /* MatchResultsTab.swift in Sources */,
 				471D787D2BDBD5520049641E /* AboutView.swift in Sources */,
 				4774E5332BD6A434009D9E4C /* UpcomingMatchTab.swift in Sources */,

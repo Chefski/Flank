@@ -5,3 +5,5 @@ Flank.xcodeproj/project.xcworkspace/xcuserdata/chefski.xcuserdatad/UserInterface
 xcuserdata/
 .build/
 
+.aider*
+.env
