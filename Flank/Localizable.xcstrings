@@ -34,6 +34,9 @@
         }
       }
     },
+    "ACS" : {
+
+    },
     "Add to Calendar" : {
       "localizations" : {
         "pl" : {
@@ -44,7 +47,19 @@
         }
       }
     },
+    "ADR" : {
+
+    },
     "Asia-pacific" : {
+
+    },
+    "Assists per round" : {
+
+    },
+    "Average combat score" : {
+
+    },
+    "Average damage per round" : {
 
     },
     "Brazil" : {
@@ -62,6 +77,12 @@
           }
         }
       }
+    },
+    "Clutch" : {
+
+    },
+    "Clutch success rate" : {
+
     },
     "Contact" : {
 
@@ -88,6 +109,12 @@
         }
       }
     },
+    "First deaths per round" : {
+
+    },
+    "First kills per round" : {
+
+    },
     "Flank" : {
 
     },
@@ -97,7 +124,25 @@
     "General app information" : {
 
     },
+    "Headshot percentage" : {
+
+    },
+    "HS%" : {
+
+    },
     "Info" : {
+
+    },
+    "KAST" : {
+
+    },
+    "KDA" : {
+
+    },
+    "Kill/Death/Assist" : {
+
+    },
+    "Kills per round" : {
 
     },
     "Korea" : {
@@ -109,6 +154,9 @@
           }
         }
       }
+    },
+    "KPR" : {
+
     },
     "LA North" : {
 
@@ -216,6 +264,23 @@
         }
       }
     },
+    "nav_stats" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stats"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Statystiki"
+          }
+        }
+      }
+    },
     "News" : {
 
     },
@@ -245,7 +310,13 @@
     "Rankings" : {
 
     },
+    "Rating" : {
+
+    },
     "Results" : {
+
+    },
+    "Rounds played" : {
 
     },
     "Search for a team" : {
@@ -265,6 +336,9 @@
 
     },
     "Terms of service" : {
+
+    },
+    "Top Agents" : {
 
     },
     "Upcoming" : {
