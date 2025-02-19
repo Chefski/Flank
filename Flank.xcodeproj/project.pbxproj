@@ -12,6 +12,9 @@
 		473464342BD7E370003827BB /* RankingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473464332BD7E370003827BB /* RankingsViewModel.swift */; };
 		473464362BD7E5E2003827BB /* RankingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473464352BD7E5E2003827BB /* RankingsView.swift */; };
 		473464382BD7E5F5003827BB /* RankingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473464372BD7E5F5003827BB /* RankingsTab.swift */; };
+		47528E5F2D5BD73F006EC29E /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47528E5E2D5BD73F006EC29E /* StatsView.swift */; };
+		47528E612D5BD821006EC29E /* StatsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47528E602D5BD821006EC29E /* StatsViewModel.swift */; };
+		47528E632D5BDF0D006EC29E /* PlayerStatTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47528E622D5BDF0D006EC29E /* PlayerStatTab.swift */; };
 		4774E5022BD6A1BC009D9E4C /* FlankApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4774E5012BD6A1BC009D9E4C /* FlankApp.swift */; };
 		4774E5042BD6A1BC009D9E4C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4774E5032BD6A1BC009D9E4C /* ContentView.swift */; };
 		4774E5062BD6A1BD009D9E4C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4774E5052BD6A1BD009D9E4C /* Assets.xcassets */; };
@@ -36,7 +39,6 @@
 		47C02EEF2C298D0D00A093B3 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 47C02EEE2C298D0D00A093B3 /* Localizable.xcstrings */; };
 		47D203632C596082008C33BA /* FlagEmojis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D203622C596082008C33BA /* FlagEmojis.swift */; };
 		47E1282E2BDFE6B3008A1825 /* ColorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 47E1282D2BDFE6B3008A1825 /* ColorKit */; };
-		47F0C5062D515B06000F1986 /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F0C5052D515B06000F1986 /* StatsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -44,6 +46,9 @@
 		473464332BD7E370003827BB /* RankingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RankingsViewModel.swift; sourceTree = "<group>"; };
 		473464352BD7E5E2003827BB /* RankingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RankingsView.swift; sourceTree = "<group>"; };
 		473464372BD7E5F5003827BB /* RankingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RankingsTab.swift; sourceTree = "<group>"; };
+		47528E5E2D5BD73F006EC29E /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
+		47528E602D5BD821006EC29E /* StatsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsViewModel.swift; sourceTree = "<group>"; };
+		47528E622D5BDF0D006EC29E /* PlayerStatTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerStatTab.swift; sourceTree = "<group>"; };
 		4774E4FE2BD6A1BC009D9E4C /* Flank.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Flank.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4774E5012BD6A1BC009D9E4C /* FlankApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlankApp.swift; sourceTree = "<group>"; };
 		4774E5032BD6A1BC009D9E4C /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -64,7 +69,6 @@
 		47C02EEE2C298D0D00A093B3 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		47D203622C596082008C33BA /* FlagEmojis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlagEmojis.swift; sourceTree = "<group>"; };
 		47EBE1A72BDAE89700EA2081 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		47F0C5052D515B06000F1986 /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
 		47F209D12C5EB83D0016B8A5 /* Flank.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Flank.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -108,7 +112,7 @@
 			children = (
 				47F209D12C5EB83D0016B8A5 /* Flank.entitlements */,
 				47AFA8122C59B3FB0004C07A /* Info.plist */,
-				4774E52F2BD6A3AF009D9E4C /* Screens */,
+				4774E52F2BD6A3AF009D9E4C /* Views */,
 				4774E52E2BD6A38C009D9E4C /* Components */,
 				4774E51E2BD6A207009D9E4C /* ViewModels */,
 				4774E5012BD6A1BC009D9E4C /* FlankApp.swift */,
@@ -138,6 +142,7 @@
 				4774E5272BD6A2C0009D9E4C /* MatchResultsViewModel.swift */,
 				4774E5292BD6A2D3009D9E4C /* UpcomingMatchesViewModel.swift */,
 				473464332BD7E370003827BB /* RankingsViewModel.swift */,
+				47528E602D5BD821006EC29E /* StatsViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -150,11 +155,12 @@
 				4774E5342BD6A445009D9E4C /* MatchResultsTab.swift */,
 				4774E53A2BD6A49C009D9E4C /* NewsTab.swift */,
 				473464372BD7E5F5003827BB /* RankingsTab.swift */,
+				47528E622D5BDF0D006EC29E /* PlayerStatTab.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
 		};
-		4774E52F2BD6A3AF009D9E4C /* Screens */ = {
+		4774E52F2BD6A3AF009D9E4C /* Views */ = {
 			isa = PBXGroup;
 			children = (
 				4774E5362BD6A452009D9E4C /* NewsView.swift */,
@@ -162,9 +168,9 @@
 				47AF05E02BD6B55100DC4128 /* HomeView.swift */,
 				473464352BD7E5E2003827BB /* RankingsView.swift */,
 				471D787C2BDBD5520049641E /* AboutView.swift */,
-				47F0C5052D515B06000F1986 /* StatsView.swift */,
+				47528E5E2D5BD73F006EC29E /* StatsView.swift */,
 			);
-			path = Screens;
+			path = Views;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -269,11 +275,13 @@
 				473464342BD7E370003827BB /* RankingsViewModel.swift in Sources */,
 				4774E53B2BD6A49C009D9E4C /* NewsTab.swift in Sources */,
 				4774E5282BD6A2C0009D9E4C /* MatchResultsViewModel.swift in Sources */,
+				47528E612D5BD821006EC29E /* StatsViewModel.swift in Sources */,
 				473464382BD7E5F5003827BB /* RankingsTab.swift in Sources */,
 				4774E5022BD6A1BC009D9E4C /* FlankApp.swift in Sources */,
 				4774E52A2BD6A2D3009D9E4C /* UpcomingMatchesViewModel.swift in Sources */,
 				4774E5312BD6A404009D9E4C /* LiveMatchTab.swift in Sources */,
-				47F0C5062D515B06000F1986 /* StatsView.swift in Sources */,
+				47528E5F2D5BD73F006EC29E /* StatsView.swift in Sources */,
+				47528E632D5BDF0D006EC29E /* PlayerStatTab.swift in Sources */,
 				4774E5352BD6A445009D9E4C /* MatchResultsTab.swift in Sources */,
 				471D787D2BDBD5520049641E /* AboutView.swift in Sources */,
 				4774E5332BD6A434009D9E4C /* UpcomingMatchTab.swift in Sources */,
@@ -410,7 +418,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Flank/FlankDebug.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 21;
+				CURRENT_PROJECT_VERSION = 22;
 				DEVELOPMENT_ASSET_PATHS = "\"Flank/Preview Content\"";
 				DEVELOPMENT_TEAM = H844BPNKMP;
 				ENABLE_PREVIEWS = YES;
@@ -429,7 +437,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.chefski.Flank;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -449,7 +457,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Flank/Flank.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 21;
+				CURRENT_PROJECT_VERSION = 22;
 				DEVELOPMENT_ASSET_PATHS = "\"Flank/Preview Content\"";
 				DEVELOPMENT_TEAM = H844BPNKMP;
 				ENABLE_PREVIEWS = YES;
@@ -468,7 +476,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.chefski.Flank;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

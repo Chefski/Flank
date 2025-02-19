@@ -14,6 +14,17 @@ struct NewsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
+                VStack {
+                    LinearGradient(
+                        colors: [.white.opacity(0.3), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 120)
+                    Spacer()
+                }
+                .ignoresSafeArea()
+                
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 10) {
                         ForEach(news.news, id: \.self) { news in
@@ -31,7 +42,6 @@ struct NewsView: View {
                 }
             }
             .navigationBarTitle("News")
-            //            .background(Color(red: 0.13, green: 0.12, blue: 0.11))
         }
         .refreshable {
             await fetchNews()

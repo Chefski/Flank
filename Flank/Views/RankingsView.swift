@@ -37,11 +37,11 @@ struct RankingsView: View {
                             .padding(.horizontal, 21)
                             .padding(.vertical, 8)
                             .background(
-    selectedRegion == "na" ? Color(red: 0.05, green: 0.7, blue: 0.59).opacity(0.3) : Color.white.opacity(0.12)
-)
-.cornerRadius(10)
-.animation(.easeInOut(duration: 0.3), value: selectedRegion)
-
+                                selectedRegion == "na" ? Color(red: 0.05, green: 0.7, blue: 0.59).opacity(0.3) : Color.white.opacity(0.12)
+                            )
+                            .cornerRadius(10)
+                            .animation(.easeInOut(duration: 0.3), value: selectedRegion)
+                            
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .inset(by: 0.5)
