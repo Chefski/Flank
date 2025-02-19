@@ -125,9 +125,13 @@ struct PlayerStatTab: View {
                         }
                         HStack {
                             Text("Rating")
+                                .fontWeight(.semibold)
+                                .font(.subheadline)
                             Spacer()
                                 .frame(width: 20)
                             Text(stat.rating)
+                                .opacity(0.8)
+                                .font(.subheadline)
                             Spacer()
                         }
                     }

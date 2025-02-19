@@ -34,90 +34,103 @@ struct HomeView: View {
     
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                if !liveMatches.liveMatches.isEmpty {
-                    HStack {
-                        Text("Live")
-                            .font(.system(size: 24, weight: .semibold))
+            ZStack {
+                VStack {
+                    LinearGradient(
+                        colors: [.white.opacity(0.3), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 120)
+                    Spacer()
+                }
+                .ignoresSafeArea()
+                
+                ScrollView(showsIndicators: false) {
+                    if !liveMatches.liveMatches.isEmpty {
+                        HStack {
+                            Text("Live")
+                                .font(.system(size: 24, weight: .semibold))
+                            Spacer()
+                        }
+                        .padding(.horizontal)
+                        
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(liveMatches.liveMatches, id: \.self) { match in
+                                    LiveMatchTab(match: match)
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    }
+                    Spacer()
+                        .padding(.vertical, 4)
+                    
+                    HStack(spacing: 15) {
+                        Button(action: {
+                            selectedTab = "Upcoming"
+                        }) {
+                            Text("Upcoming")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                        .opacity(selectedTab == "Upcoming" ? 1.0 : 0.5)
+                        
+                        Button(action: {
+                            selectedTab = "Results"
+                        }) {
+                            Text("Results")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                        .opacity(selectedTab == "Results" ? 1.0 : 0.5)
+                        
                         Spacer()
                     }
                     .padding(.horizontal)
                     
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(liveMatches.liveMatches, id: \.self) { match in
-                                LiveMatchTab(match: match)
+                    if selectedTab == "Upcoming" {
+                        ScrollView(.vertical, showsIndicators: false) {
+                            LazyVStack(spacing: 12) {
+                                ForEach(upcomingMatches.upcomingMatches, id: \.self) { match in
+                                    UpcomingMatchTab(match: match)
+                                }
                             }
+                            .padding(.horizontal)
                         }
-                        .padding(.horizontal)
-                    }
-                }
-                Spacer()
-                    .padding(.vertical, 4)
-                
-                HStack(spacing: 15) {
-                    Button(action: {
-                        selectedTab = "Upcoming"
-                    }) {
-                        Text("Upcoming")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    .opacity(selectedTab == "Upcoming" ? 1.0 : 0.5)
-                    
-                    Button(action: {
-                        selectedTab = "Results"
-                    }) {
-                        Text("Results")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    .opacity(selectedTab == "Results" ? 1.0 : 0.5)
-                    
-                    Spacer()
-                }
-                .padding(.horizontal)
-                
-                if selectedTab == "Upcoming" {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        LazyVStack(spacing: 12) {
-                            ForEach(upcomingMatches.upcomingMatches, id: \.self) { match in
-                                UpcomingMatchTab(match: match)
+                    } else {
+                        ScrollView(.vertical, showsIndicators: false) {
+                            VStack(spacing: 15) {
+                                ForEach(pastResults.matches, id: \.self) { match in
+                                    MatchResultsTab(match: match)
+                                }
                             }
+                            .padding(.horizontal)
                         }
-                        .padding(.horizontal)
-                    }
-                } else {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 15) {
-                            ForEach(pastResults.matches, id: \.self) { match in
-                                MatchResultsTab(match: match)
-                            }
-                        }
-                        .padding(.horizontal)
                     }
                 }
-            }
-            .refreshable {
-                Task {
-                    await self.liveMatches.fetch()
-                    await self.upcomingMatches.fetch()
-                    await self.pastResults.fetch()
+                .refreshable {
+                    Task {
+                        await self.liveMatches.fetch()
+                        await self.upcomingMatches.fetch()
+                        await self.pastResults.fetch()
+                    }
                 }
-            }
-            .onAppear {
-                Task {
-                    await self.liveMatches.fetch()
-                    await self.upcomingMatches.fetch()
-                    await self.pastResults.fetch()
-                    
-                    //                    checkAndShowWhatsNew()
+                .onAppear {
+                    Task {
+                        await self.liveMatches.fetch()
+                        await self.upcomingMatches.fetch()
+                        await self.pastResults.fetch()
+                        
+                        //                    checkAndShowWhatsNew()
+                    }
                 }
+                //            .sheet(isPresented: $showWhatsNew) {
+                //                WhatsNewView(whatsNew: whatsNew!)
+                //            }
+                .navigationTitle("Matches")
             }
-            //            .sheet(isPresented: $showWhatsNew) {
-            //                WhatsNewView(whatsNew: whatsNew!)
-            //            }
-            .navigationTitle("Matches")
             //            .background(Color(red: 0.13, green: 0.12, blue: 0.11))
         }
     }

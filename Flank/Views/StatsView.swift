@@ -21,6 +21,17 @@ struct StatsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
+                VStack {
+                    LinearGradient(
+                        colors: [.white.opacity(0.3), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 120)
+                    Spacer()
+                }
+                .ignoresSafeArea()
+                
                 ScrollView(showsIndicators: false) {
                     VStack() {
                         // Region and Time Range Selectors
@@ -43,6 +54,7 @@ struct StatsView: View {
                                         .foregroundColor(.black)
                                     Text(selectedRegion)
                                         .foregroundColor(.black)
+                                        .fontWeight(.semibold)
                                     Image(systemName: "chevron.up.chevron.down")
                                         .foregroundColor(.black)
                                 }
@@ -70,6 +82,7 @@ struct StatsView: View {
                                         .foregroundColor(.black)
                                     Text(selectedTimeRange)
                                         .foregroundColor(.black)
+                                        .fontWeight(.semibold)
                                     Image(systemName: "chevron.up.chevron.down")
                                         .foregroundColor(.black)
                                 }
