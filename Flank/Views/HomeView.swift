@@ -6,31 +6,65 @@
 //
 
 import SwiftUI
-//import WhatsNewKit
+import WhatsNewKit
 
 struct HomeView: View {
-    @State private var showSettingsPopover = false
     @State private var selectedTab = "Upcoming"
+    @State private var searchText = ""
     
     @ObservedObject var pastResults = ShowResults()
     @ObservedObject var upcomingMatches = ShowUpcoming()
     @ObservedObject var liveMatches = ShowLive()
     
-    //    @State private var showWhatsNew = false
-    //    
-    //    @State var whatsNew: WhatsNew? = WhatsNew(
-    //        title: "What's new?",
-    //        features: [
-    //            .init(
-    //                image: .init(
-    //                    systemName: "envelope.fill",
-    //                    foregroundColor: .orange
-    //                ),
-    //                title: "Contact via email",
-    //                subtitle: "You can now get in contact quickly"
-    //            ),
-    //        ]
-    //    )
+    @State private var showWhatsNew = false
+    
+    @State var whatsNew: WhatsNew? = WhatsNew(
+        title: "What's new?",
+        features: [
+            .init(
+                image: .init(
+                    systemName: "magnifyingglass",
+                    foregroundColor: .white
+                ),
+                title: "Search for matches",
+                subtitle: "Find upcoming and past matches with the search bar instead of scrolling!"
+            ),
+            .init(
+                image: .init(
+                    systemName: "sparkles",
+                    foregroundColor: .purple
+                ),
+                title: "Redesigned result tabs",
+                subtitle: "Result tabs have been redesigned to a more colorful and modern look!"
+            ),
+        ]
+    )
+    
+    var filteredUpcomingMatches: [UpcomingMatch] {
+        if searchText.isEmpty {
+            return upcomingMatches.upcomingMatches
+        } else {
+            return upcomingMatches.upcomingMatches.filter { match in
+                match.team1.localizedCaseInsensitiveContains(searchText) ||
+                match.team2.localizedCaseInsensitiveContains(searchText) ||
+                match.match_event.localizedCaseInsensitiveContains(searchText) ||
+                match.match_series.localizedCaseInsensitiveContains(searchText)
+            }
+        }
+    }
+    
+    var filteredPastResults: [Match] {
+        if searchText.isEmpty {
+            return pastResults.matches
+        } else {
+            return pastResults.matches.filter { match in
+                match.team1.localizedCaseInsensitiveContains(searchText) ||
+                match.team2.localizedCaseInsensitiveContains(searchText) ||
+                match.tournament_name.localizedCaseInsensitiveContains(searchText) ||
+                match.round_info.localizedCaseInsensitiveContains(searchText)
+            }
+        }
+    }
     
     var body: some View {
         NavigationStack {
@@ -91,22 +125,48 @@ struct HomeView: View {
                     .padding(.horizontal)
                     
                     if selectedTab == "Upcoming" {
-                        ScrollView(.vertical, showsIndicators: false) {
-                            LazyVStack(spacing: 12) {
-                                ForEach(upcomingMatches.upcomingMatches, id: \.self) { match in
-                                    UpcomingMatchTab(match: match)
-                                }
+                        if filteredUpcomingMatches.isEmpty && !searchText.isEmpty {
+                            VStack(spacing: 20) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.white.opacity(0.5))
+                                Text("No upcoming matches found")
+                                    .font(.headline)
+                                    .foregroundColor(.white.opacity(0.7))
                             }
-                            .padding(.horizontal)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 50)
+                        } else {
+                            ScrollView(.vertical, showsIndicators: false) {
+                                LazyVStack(spacing: 12) {
+                                    ForEach(filteredUpcomingMatches, id: \.self) { match in
+                                        UpcomingMatchTab(match: match)
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
                         }
                     } else {
-                        ScrollView(.vertical, showsIndicators: false) {
-                            VStack(spacing: 15) {
-                                ForEach(pastResults.matches, id: \.self) { match in
-                                    MatchResultsTab(match: match)
-                                }
+                        if filteredPastResults.isEmpty && !searchText.isEmpty {
+                            VStack(spacing: 20) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.white.opacity(0.5))
+                                Text("No match results found")
+                                    .font(.headline)
+                                    .foregroundColor(.white.opacity(0.7))
                             }
-                            .padding(.horizontal)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 50)
+                        } else {
+                            ScrollView(.vertical, showsIndicators: false) {
+                                VStack(spacing: 15) {
+                                    ForEach(filteredPastResults, id: \.self) { match in
+                                        MatchResultsTab(match: match)
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
                         }
                     }
                 }
@@ -123,27 +183,27 @@ struct HomeView: View {
                         await self.upcomingMatches.fetch()
                         await self.pastResults.fetch()
                         
-                        //                    checkAndShowWhatsNew()
+                        checkAndShowWhatsNew()
                     }
                 }
-                //            .sheet(isPresented: $showWhatsNew) {
-                //                WhatsNewView(whatsNew: whatsNew!)
-                //            }
+                .sheet(isPresented: $showWhatsNew) {
+                    WhatsNewView(whatsNew: whatsNew!)
+                }
                 .navigationTitle("Matches")
+                .searchable(text: $searchText, prompt: "Search matches...")
             }
-            //            .background(Color(red: 0.13, green: 0.12, blue: 0.11))
         }
     }
     
-    //    private func checkAndShowWhatsNew() {
-    //        let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-    //        let lastVersionPrompted = UserDefaults.standard.string(forKey: "LastWhatsNewVersion")
-    //        
-    //        if lastVersionPrompted != currentVersion {
-    //            showWhatsNew = true
-    //            UserDefaults.standard.set(currentVersion, forKey: "LastWhatsNewVersion")
-    //        }
-    //    }
+    private func checkAndShowWhatsNew() {
+        let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let lastVersionPrompted = UserDefaults.standard.string(forKey: "LastWhatsNewVersion")
+        
+        if lastVersionPrompted != currentVersion {
+            showWhatsNew = true
+            UserDefaults.standard.set(currentVersion, forKey: "LastWhatsNewVersion")
+        }
+    }
 }
 
 

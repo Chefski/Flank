@@ -278,9 +278,7 @@ struct UpcomingMatchTab: View {
     }
     
     private func formatMatchTime(unixTimestamp: String) -> String {
-        print("Debug: Received timestamp: \(unixTimestamp)")
-        
-        let dateFormatter = DateFormatter()
+                let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         dateFormatter.timeZone = TimeZone.current
         
@@ -294,8 +292,6 @@ struct UpcomingMatchTab: View {
             dateFormatter.dateFormat = "HH:mm"
             return dateFormatter.string(from: date)
         }
-        
-        print("Debug: Failed to parse timestamp")
         return "Unknown time"
     }
 }
