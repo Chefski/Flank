@@ -85,29 +85,50 @@
 
     },
     "Contact" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontakt"
+          }
+        }
+      }
     },
     "Country" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kraj"
+          }
+        }
+      }
     },
     "Data provided by" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Źródło danych"
+          }
+        }
+      }
     },
     "Earnings" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zarobki"
+          }
+        }
+      }
     },
     "Error" : {
 
     },
     "Europe" : {
-      "localizations" : {
-        "pl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Europa"
-          }
-        }
-      }
+
     },
     "First deaths per round" : {
 
@@ -116,7 +137,14 @@
 
     },
     "Flank" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flank"
+          }
+        }
+      }
     },
     "Game Changers" : {
 
@@ -131,7 +159,14 @@
 
     },
     "Info" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Info"
+          }
+        }
+      }
     },
     "KAST" : {
 
@@ -165,7 +200,14 @@
 
     },
     "Last played team" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ostatnia drużyna przeciwnika"
+          }
+        }
+      }
     },
     "Live" : {
       "localizations" : {
@@ -181,7 +223,14 @@
 
     },
     "Matches" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mecze"
+          }
+        }
+      }
     },
     "Mena" : {
 
@@ -282,7 +331,14 @@
       }
     },
     "News" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wiadomości"
+          }
+        }
+      }
     },
     "North America" : {
 
@@ -308,19 +364,54 @@
       }
     },
     "Rankings" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rankingi"
+          }
+        }
+      }
     },
     "Rating" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ocena"
+          }
+        }
+      }
     },
     "Results" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wyniki"
+          }
+        }
+      }
     },
     "Rounds played" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rozegrane rundy"
+          }
+        }
+      }
     },
     "Search for a team" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Szukaj drużyny"
+          }
+        }
+      }
     },
     "Settings" : {
       "localizations" : {
@@ -333,16 +424,44 @@
       }
     },
     "Stats" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Statystyki"
+          }
+        }
+      }
     },
     "Terms of service" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Regulamin"
+          }
+        }
+      }
     },
     "Top Agents" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Najlepsi agenci"
+          }
+        }
+      }
     },
     "Upcoming" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nadchodzące"
+          }
+        }
+      }
     },
     "V%@ (%@)" : {
       "localizations" : {
@@ -355,10 +474,24 @@
       }
     },
     "View on vlr.gg" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zobacz na VLR.gg"
+          }
+        }
+      }
     },
     "vs" : {
-
+      "localizations" : {
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vs"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

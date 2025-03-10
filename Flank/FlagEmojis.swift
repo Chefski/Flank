@@ -49,6 +49,8 @@ public let flagEmojis: [String: String] = [
     "flag_vn": "🇻🇳",
     "flag_th": "🇹🇭",
     "flag_my": "🇲🇾",
+    "flag_kz": "🇰🇿",
+    "flag_ie": "🇮🇪"
 ]
 
 public func emoji(for flagCode: String) -> String {
