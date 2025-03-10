@@ -104,6 +104,9 @@
         }
       }
     },
+    "Customize app behavior" : {
+
+    },
     "Data provided by" : {
       "localizations" : {
         "pl" : {
@@ -113,6 +116,12 @@
           }
         }
       }
+    },
+    "Default Region" : {
+
+    },
+    "Default Tab" : {
+
     },
     "Earnings" : {
       "localizations" : {
@@ -358,6 +367,9 @@
           }
         }
       }
+    },
+    "Preferences" : {
+
     },
     "Privacy Policy" : {
       "localizations" : {

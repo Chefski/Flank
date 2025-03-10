@@ -9,7 +9,8 @@ import SwiftUI
 import WhatsNewKit
 
 struct HomeView: View {
-    @State private var selectedTab = "Upcoming"
+    @AppStorage("defaultTab") private var defaultTab = "Upcoming"
+    @State private var selectedTab = ""
     @State private var searchText = ""
     
     @ObservedObject var pastResults = ShowResults()
@@ -24,7 +25,7 @@ struct HomeView: View {
             .init(
                 image: .init(
                     systemName: "magnifyingglass",
-                    foregroundColor: .white
+                    foregroundColor: .blue
                 ),
                 title: "Search for matches",
                 subtitle: "Find upcoming and past matches with the search bar instead of scrolling!"
@@ -36,6 +37,14 @@ struct HomeView: View {
                 ),
                 title: "Redesigned result tabs",
                 subtitle: "Result tabs have been redesigned to a more colorful and modern look!"
+            ),
+            .init(
+                image: .init(
+                    systemName: "slider.horizontal.3",
+                    foregroundColor: .green
+                ),
+                title: "Choose your defaults",
+                subtitle: "You can choose to see the upcoming matches or results at launch. You can also pick your favorite region!"
             ),
         ]
     )
@@ -179,6 +188,10 @@ struct HomeView: View {
                 }
                 .onAppear {
                     Task {
+                        if selectedTab.isEmpty {
+                            selectedTab = defaultTab
+                        }
+                        
                         await self.liveMatches.fetch()
                         await self.upcomingMatches.fetch()
                         await self.pastResults.fetch()

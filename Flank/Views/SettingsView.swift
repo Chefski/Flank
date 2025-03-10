@@ -16,13 +16,26 @@ struct SettingsView: View {
     @State private var showAlert = false
     @State private var alertMessage = ""
     
+    @AppStorage("defaultTab") private var defaultTab = "Upcoming"
+    @AppStorage("defaultRegion") private var defaultRegion = "na"
+    
+    private let regionNames = [
+        "na": "North America",
+        "eu": "Europe",
+        "br": "Brazil",
+        "ap": "Asia-Pacific",
+        "la-s": "LA South",
+        "kr": "Korea",
+        "cn": "China",
+        "gc": "Game Changers",
+        "la-n": "LA North",
+        "mn": "Mena"
+    ]
+    
     var body: some View {
         NavigationStack {
             List {
                 Section(header: Text("Info"), footer: Text("General app information")) {
-                    //                    NavigationLink(destination: AboutView()) {
-                    //                        Label("About", systemImage: "info.circle")
-                    //                    }
                     Button(action: {
                         showAboutView = true
                     }) {
@@ -66,6 +79,22 @@ struct SettingsView: View {
                         .ignoresSafeArea()
                     }
                 }
+                
+                Section(header: Text("Preferences"), footer: Text("Customize app behavior")) {
+                    Picker("Default Tab", selection: $defaultTab) {
+                        Text("Upcoming").tag("Upcoming")
+                        Text("Results").tag("Results")
+                    }
+                    .pickerStyle(.menu)
+                    
+                    Picker("Default Region", selection: $defaultRegion) {
+                        ForEach(Array(regionNames.keys.sorted()), id: \.self) { key in
+                            Text(regionNames[key] ?? key).tag(key)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                
                 Button(action: {
                     openMail()
                 }) {

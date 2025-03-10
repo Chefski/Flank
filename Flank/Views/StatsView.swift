@@ -34,9 +34,7 @@ struct StatsView: View {
                 
                 ScrollView(showsIndicators: false) {
                     VStack() {
-                        // Region and Time Range Selectors
                         HStack(spacing: 10) {
-                            // Region Dropdown
                             Menu {
                                 ForEach(regions, id: \.self) { region in
                                     Button(action: {
@@ -64,7 +62,6 @@ struct StatsView: View {
                                 .cornerRadius(6)
                             }
                             
-                            // Time Range Dropdown
                             Menu {
                                 ForEach(timeRanges, id: \.self) { range in
                                     Button(action: {
@@ -135,24 +132,24 @@ struct StatsView: View {
     
     private func regionToCode(_ region: String) -> String {
         switch region {
-            case "Europe": return "eu"
-            case "North America": return "na"
-            case "Asia Pacific": return "ap"
-            case "Latin America": return "sa"
-            case "Japan": return "jp"
-            case "Oceania": return "oce"
-            case "Mena": return "mena"
-            default: return "eu"
+        case "Europe": return "eu"
+        case "North America": return "na"
+        case "Asia Pacific": return "ap"
+        case "Latin America": return "sa"
+        case "Japan": return "jp"
+        case "Oceania": return "oce"
+        case "Mena": return "mena"
+        default: return "eu"
         }
     }
     
     private func timeRangeToInt(_ range: String) -> Int {
         switch range {
-            case "30 days": return 30
-            case "60 days": return 60
-            case "90 days": return 90
-            case "all-time": return 365 // Should be all
-            default: return 30
+        case "30 days": return 30
+        case "60 days": return 60
+        case "90 days": return 90
+        case "all-time": return 365 // Should be all
+        default: return 30
         }
     }
 }
