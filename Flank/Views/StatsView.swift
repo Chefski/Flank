@@ -9,13 +9,13 @@ import SwiftUI
 
 struct StatsView: View {
     @StateObject var statsVM = ShowStats()
-    @State private var selectedRegion: String = "Europe"
-    @State private var selectedTimeRange: String = "30d"
+    @State private var selectedRegion: String = "All"
+    @State private var selectedTimeRange: String = "30 days"
     @State private var isLoading = false
     @State private var selectedStat: PlayerStats? = nil
     @State private var showingPlayerSheet = false
     
-    let regions = ["Europe", "North America", "South America", "Asia Pacific", "Latin America", "Japan", "Oceania", "Mena"]
+    let regions = ["All", "Americas", "EMEA", "Pacific", "China", "International"]
     let timeRanges = ["30 days", "60 days", "90 days", "all-time"]
     
     var body: some View {
@@ -34,61 +34,58 @@ struct StatsView: View {
                 
                 ScrollView(showsIndicators: false) {
                     VStack() {
-                        HStack(spacing: 10) {
-                            Menu {
-                                ForEach(regions, id: \.self) { region in
-                                    Button(action: {
-                                        selectedRegion = region
-                                        Task {
-                                            await fetchStats()
+                        GlassEffectContainer(spacing: 10) {
+                            HStack(spacing: 10) {
+                                Menu {
+                                    ForEach(regions, id: \.self) { region in
+                                        Button {
+                                            selectedRegion = region
+                                            Task {
+                                                await fetchStats()
+                                            }
+                                        } label: {
+                                            if selectedRegion == region {
+                                                Label(region, systemImage: "checkmark")
+                                            } else {
+                                                Text(region)
+                                            }
                                         }
-                                    }) {
-                                        Text(region)
                                     }
-                                }
-                            } label: {
-                                HStack {
-                                    Image(systemName: "globe")
-                                        .foregroundColor(.black)
-                                    Text(selectedRegion)
-                                        .foregroundColor(.black)
+                                } label: {
+                                    Label(selectedRegion, systemImage: "globe")
                                         .fontWeight(.semibold)
-                                    Image(systemName: "chevron.up.chevron.down")
-                                        .foregroundColor(.black)
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color(.white))
-                                .cornerRadius(6)
-                            }
-                            
-                            Menu {
-                                ForEach(timeRanges, id: \.self) { range in
-                                    Button(action: {
-                                        selectedTimeRange = range
-                                        Task {
-                                            await fetchStats()
+                                .menuIndicator(.visible)
+                                .buttonStyle(.glass)
+                                .buttonBorderShape(.capsule)
+                                .controlSize(.large)
+
+                                Menu {
+                                    ForEach(timeRanges, id: \.self) { range in
+                                        Button {
+                                            selectedTimeRange = range
+                                            Task {
+                                                await fetchStats()
+                                            }
+                                        } label: {
+                                            if selectedTimeRange == range {
+                                                Label(range, systemImage: "checkmark")
+                                            } else {
+                                                Text(range)
+                                            }
                                         }
-                                    }) {
-                                        Text(range)
                                     }
-                                }
-                            } label: {
-                                HStack {
-                                    Image(systemName: "clock")
-                                        .foregroundColor(.black)
-                                    Text(selectedTimeRange)
-                                        .foregroundColor(.black)
+                                } label: {
+                                    Label(selectedTimeRange, systemImage: "clock")
                                         .fontWeight(.semibold)
-                                    Image(systemName: "chevron.up.chevron.down")
-                                        .foregroundColor(.black)
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color(.white))
-                                .cornerRadius(6)
+                                .menuIndicator(.visible)
+                                .buttonStyle(.glass)
+                                .buttonBorderShape(.capsule)
+                                .controlSize(.large)
+
+                                Spacer()
                             }
-                            Spacer()
                         }
                         .padding(.horizontal)
                         
@@ -124,7 +121,7 @@ struct StatsView: View {
     
     func fetchStats() async {
         isLoading = true
-        let timespan = timeRangeToInt(selectedTimeRange)
+        let timespan = timeRangeToAPIValue(selectedTimeRange)
         let regionCode = regionToCode(selectedRegion)
         await statsVM.fetch(for: regionCode, for: timespan)
         isLoading = false
@@ -132,24 +129,22 @@ struct StatsView: View {
     
     private func regionToCode(_ region: String) -> String {
         switch region {
-        case "Europe": return "eu"
-        case "North America": return "na"
-        case "Asia Pacific": return "ap"
-        case "Latin America": return "sa"
-        case "Japan": return "jp"
-        case "Oceania": return "oce"
-        case "Mena": return "mena"
-        default: return "eu"
+        case "Americas": return "americas"
+        case "EMEA": return "emea"
+        case "Pacific": return "pacific"
+        case "China": return "china"
+        case "International": return "intl"
+        default: return "all"
         }
     }
     
-    private func timeRangeToInt(_ range: String) -> Int {
+    private func timeRangeToAPIValue(_ range: String) -> String {
         switch range {
-        case "30 days": return 30
-        case "60 days": return 60
-        case "90 days": return 90
-        case "all-time": return 365 // Should be all
-        default: return 30
+        case "30 days": return "30"
+        case "60 days": return "60"
+        case "90 days": return "90"
+        case "all-time": return "all"
+        default: return "30"
         }
     }
 }

@@ -7,10 +7,6 @@
 
 import Foundation
 
-struct NewsAPIResponse: Codable {
-    let data: NewsDataModel
-}
-
 struct NewsDataModel: Hashable, Codable {
     let status: Int
     let segments: [News]
@@ -24,7 +20,8 @@ struct News: Hashable, Codable {
     var url_path: String
 }
 
-class ShowNews: ObservableObject {
+@MainActor
+final class ShowNews: ObservableObject {
     @Published var news: [News] = []
     private let cacheKey = "cachedNews"
     
@@ -46,17 +43,10 @@ class ShowNews: ObservableObject {
     }
     
     func fetch() async {
-        guard let url = URL(string: "https://vlrggapi.vercel.app/news") else {
-            return
-        }
-        
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let response = try JSONDecoder().decode(NewsAPIResponse.self, from: data)
-            DispatchQueue.main.async {
-                self.news = response.data.segments
-                self.cacheNews()
-            }
+            let response = try await VLRAPI.fetch(NewsDataModel.self, path: "news")
+            news = response.segments
+            cacheNews()
         } catch {
             print("Error fetching news: \(error)")
         }

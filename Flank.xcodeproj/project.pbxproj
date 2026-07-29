@@ -39,6 +39,7 @@
 		47C02EEF2C298D0D00A093B3 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 47C02EEE2C298D0D00A093B3 /* Localizable.xcstrings */; };
 		47D203632C596082008C33BA /* FlagEmojis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D203622C596082008C33BA /* FlagEmojis.swift */; };
 		47E1282E2BDFE6B3008A1825 /* ColorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 47E1282D2BDFE6B3008A1825 /* ColorKit */; };
+		A10203042F12345678900001 /* VLRAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10203042F12345678900002 /* VLRAPI.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -70,6 +71,7 @@
 		47D203622C596082008C33BA /* FlagEmojis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlagEmojis.swift; sourceTree = "<group>"; };
 		47EBE1A72BDAE89700EA2081 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		47F209D12C5EB83D0016B8A5 /* Flank.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Flank.entitlements; sourceTree = "<group>"; };
+		A10203042F12345678900002 /* VLRAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLRAPI.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -137,6 +139,7 @@
 		4774E51E2BD6A207009D9E4C /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				A10203042F12345678900002 /* VLRAPI.swift */,
 				4774E5232BD6A29C009D9E4C /* LiveMatchesViewModel.swift */,
 				4774E5252BD6A2B3009D9E4C /* NewsViewModel.swift */,
 				4774E5272BD6A2C0009D9E4C /* MatchResultsViewModel.swift */,
@@ -265,6 +268,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10203042F12345678900001 /* VLRAPI.swift in Sources */,
 				4774E5242BD6A29C009D9E4C /* LiveMatchesViewModel.swift in Sources */,
 				473464362BD7E5E2003827BB /* RankingsView.swift in Sources */,
 				47AF05E12BD6B55100DC4128 /* HomeView.swift in Sources */,
@@ -418,7 +422,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Flank/FlankDebug.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEVELOPMENT_ASSET_PATHS = "\"Flank/Preview Content\"";
 				DEVELOPMENT_TEAM = H844BPNKMP;
 				ENABLE_PREVIEWS = YES;
@@ -433,11 +437,12 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.chefski.Flank;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -457,7 +462,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Flank/Flank.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEVELOPMENT_ASSET_PATHS = "\"Flank/Preview Content\"";
 				DEVELOPMENT_TEAM = H844BPNKMP;
 				ENABLE_PREVIEWS = YES;
@@ -472,11 +477,12 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.chefski.Flank;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

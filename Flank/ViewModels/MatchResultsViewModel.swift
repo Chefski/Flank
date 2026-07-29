@@ -7,10 +7,6 @@
 
 import Foundation
 
-struct ResultAPIResponse: Codable {
-    let data: DataModel
-}
-
 struct DataModel: Codable {
     var status: Int
     var segments: [Match]
@@ -19,6 +15,8 @@ struct DataModel: Codable {
 struct Match: Hashable, Codable {
     var team1: String
     var team2: String
+    var team1_logo: String? = nil
+    var team2_logo: String? = nil
     var score1: String
     var score2: String
     var flag1: String
@@ -30,7 +28,8 @@ struct Match: Hashable, Codable {
     var tournament_icon: String
 }
 
-class ShowResults: ObservableObject {
+@MainActor
+final class ShowResults: ObservableObject {
     @Published var matches: [Match] = []
     private let cacheKey = "cachedMatches"
     
@@ -52,17 +51,62 @@ class ShowResults: ObservableObject {
     }
     
     func fetch() async {
-        guard let url = URL(string: "https://vlrggapi.vercel.app/match?q=results") else {
-            return
-        }
-        
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let response = try JSONDecoder().decode(ResultAPIResponse.self, from: data)
-            DispatchQueue.main.async {
-                self.matches = response.data.segments
-                self.cacheMatches()
+            let response = try await VLRAPI.fetch(
+                DataModel.self,
+                path: "match",
+                queryItems: [URLQueryItem(name: "q", value: "results")]
+            )
+            let cachedLogos = Dictionary(
+                matches.map {
+                    (
+                        $0.match_page,
+                        VLRMatchLogos(team1: $0.team1_logo, team2: $0.team2_logo)
+                    )
+                },
+                uniquingKeysWith: { first, _ in first }
+            )
+            var fetchedMatches = response.segments
+
+            for index in fetchedMatches.indices {
+                guard let logos = cachedLogos[fetchedMatches[index].match_page] else {
+                    continue
+                }
+                if VLRAPI.imageURL(from: fetchedMatches[index].team1_logo) == nil {
+                    fetchedMatches[index].team1_logo = logos.team1
+                }
+                if VLRAPI.imageURL(from: fetchedMatches[index].team2_logo) == nil {
+                    fetchedMatches[index].team2_logo = logos.team2
+                }
             }
+
+            let requests = fetchedMatches.compactMap { match -> VLRMatchLogoRequest? in
+                guard VLRAPI.imageURL(from: match.team1_logo) == nil ||
+                        VLRAPI.imageURL(from: match.team2_logo) == nil else {
+                    return nil
+                }
+                return VLRMatchLogoRequest(
+                    matchPage: match.match_page,
+                    team1: match.team1,
+                    team2: match.team2
+                )
+            }
+            let logosByMatch = await VLRAPI.fetchMatchLogos(for: requests)
+
+            for index in fetchedMatches.indices {
+                guard let logos = logosByMatch[fetchedMatches[index].match_page] else {
+                    continue
+                }
+                if VLRAPI.imageURL(from: fetchedMatches[index].team1_logo) == nil {
+                    fetchedMatches[index].team1_logo = logos.team1
+                }
+                if VLRAPI.imageURL(from: fetchedMatches[index].team2_logo) == nil {
+                    fetchedMatches[index].team2_logo = logos.team2
+                }
+            }
+
+            matches = fetchedMatches
+            cacheMatches()
         } catch {
             print("Error fetching match results: \(error)")
         }

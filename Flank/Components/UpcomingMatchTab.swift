@@ -29,11 +29,7 @@ struct UpcomingMatchTab: View {
                 Spacer()
                 HStack{
                     VStack {
-                        let teamName = match.team1.hasSuffix(" GC") ? String(match.team1.dropLast(3)) : match.team1
-                        Image(uiImage: UIImage(named: teamName) ?? UIImage(named: "unknown_team")!)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 46, height: 46)
+                        teamLogo(url: match.team1_logo)
                         Text(match.team1)
                             .font(.system(size: 13, weight: .bold))
                             .frame(width: 115)
@@ -66,11 +62,7 @@ struct UpcomingMatchTab: View {
                                 .stroke(.white.opacity(0.1), lineWidth: 0.5)
                         )
                     VStack {
-                        let teamName = match.team2.hasSuffix(" GC") ? String(match.team2.dropLast(3)) : match.team2
-                        Image(uiImage: UIImage(named: teamName) ?? UIImage(named: "unknown_team")!)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 46, height: 46)
+                        teamLogo(url: match.team2_logo)
                         Text(match.team2)
                             .font(.system(size: 13, weight: .bold))
                             .frame(width: 115)
@@ -178,6 +170,24 @@ struct UpcomingMatchTab: View {
         }
     }
     
+    private func teamLogo(url: String?) -> some View {
+        AsyncImage(
+            url: VLRAPI.imageURL(from: url),
+            content: { image in
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 46, height: 46)
+            },
+            placeholder: {
+                Image("unknown_team")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 46, height: 46)
+            }
+        )
+    }
+
     private func convertUnixTimestampToDate(unixTimestamp: String) -> Date? {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
@@ -186,28 +196,14 @@ struct UpcomingMatchTab: View {
     
     private func requestCalendarAccess(completion: @escaping (Bool) -> Void) {
         let eventStore = EKEventStore()
-        
-        if #available(iOS 17.0, *) {
-            eventStore.requestWriteOnlyAccessToEvents { granted, error in
-                DispatchQueue.main.async {
-                    if let error = error {
-                        print("Error requesting calendar access: \(error.localizedDescription)")
-                        completion(false)
-                    } else {
-                        completion(granted)
-                    }
-                }
-            }
-        } else {
-            // Fallback for iOS versions prior to 17.0
-            eventStore.requestAccess(to: .event) { granted, error in
-                DispatchQueue.main.async {
-                    if let error = error {
-                        print("Error requesting calendar access: \(error.localizedDescription)")
-                        completion(false)
-                    } else {
-                        completion(granted)
-                    }
+
+        eventStore.requestWriteOnlyAccessToEvents { granted, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("Error requesting calendar access: \(error.localizedDescription)")
+                    completion(false)
+                } else {
+                    completion(granted)
                 }
             }
         }
@@ -233,52 +229,29 @@ struct UpcomingMatchTab: View {
             }
         }
         
-        if #available(iOS 17.0, *) {
-            switch EKEventStore.authorizationStatus(for: .event) {
-            case .fullAccess, .writeOnly:
-                saveEvent()
-            case .notDetermined:
-                requestCalendarAccess { granted in
-                    if granted {
-                        saveEvent()
-                    } else {
-                        self.calendarAlertMessage = "Calendar access denied."
-                        self.showingCalendarAlert = true
-                    }
+        switch EKEventStore.authorizationStatus(for: .event) {
+        case .fullAccess, .writeOnly:
+            saveEvent()
+        case .notDetermined:
+            requestCalendarAccess { granted in
+                if granted {
+                    saveEvent()
+                } else {
+                    self.calendarAlertMessage = "Calendar access denied."
+                    self.showingCalendarAlert = true
                 }
-            case .restricted, .denied:
-                calendarAlertMessage = "Calendar access is restricted or denied. Please check your settings."
-                showingCalendarAlert = true
-            @unknown default:
-                calendarAlertMessage = "Unknown calendar authorization status."
-                showingCalendarAlert = true
             }
-        } else {
-            // Fallback for iOS versions prior to 17.0
-            switch EKEventStore.authorizationStatus(for: .event) {
-            case .authorized:
-                saveEvent()
-            case .notDetermined:
-                requestCalendarAccess { granted in
-                    if granted {
-                        saveEvent()
-                    } else {
-                        self.calendarAlertMessage = "Calendar access denied."
-                        self.showingCalendarAlert = true
-                    }
-                }
-            case .restricted, .denied:
-                calendarAlertMessage = "Calendar access is restricted or denied. Please check your settings."
-                showingCalendarAlert = true
-            @unknown default:
-                calendarAlertMessage = "Unknown calendar authorization status."
-                showingCalendarAlert = true
-            }
+        case .restricted, .denied:
+            calendarAlertMessage = "Calendar access is restricted or denied. Please check your settings."
+            showingCalendarAlert = true
+        @unknown default:
+            calendarAlertMessage = "Unknown calendar authorization status."
+            showingCalendarAlert = true
         }
     }
     
     private func formatMatchTime(unixTimestamp: String) -> String {
-                let dateFormatter = DateFormatter()
+        let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         dateFormatter.timeZone = TimeZone.current
         

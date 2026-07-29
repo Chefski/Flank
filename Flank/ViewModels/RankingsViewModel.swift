@@ -9,7 +9,7 @@ import Foundation
 
 struct RankingsDataModel: Hashable, Codable {
     let status: Int
-    let data: [Rankings]
+    let segments: [Rankings]
 }
 
 struct Rankings: Hashable, Codable {
@@ -27,7 +27,8 @@ struct Rankings: Hashable, Codable {
     }
 }
 
-class ShowRankings: ObservableObject {
+@MainActor
+final class ShowRankings: ObservableObject {
     @Published var rankings: [Rankings] = []
     private let cacheKey = "cachedRankings"
     
@@ -49,18 +50,14 @@ class ShowRankings: ObservableObject {
     }
     
     func fetch(for region: String) async {
-        guard let url = URL(string: "https://vlrggapi.vercel.app/rankings?region=\(region)") else {
-            return
-        }
-        
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            
-            let response = try JSONDecoder().decode(RankingsDataModel.self, from: data)
-            DispatchQueue.main.async {
-                self.rankings = response.data
-                self.cacheRankings()
-            }
+            let response = try await VLRAPI.fetch(
+                RankingsDataModel.self,
+                path: "rankings",
+                queryItems: [URLQueryItem(name: "region", value: region)]
+            )
+            rankings = response.segments
+            cacheRankings()
         } catch {
             print(error)
         }

@@ -25,7 +25,7 @@ struct RankingsTab: View {
             Text(team.rank)
                 .font(.system(size: 17, weight: .bold))
             AsyncImage(
-                url: URL(string: "https:\(team.logo)"),
+                url: VLRAPI.imageURL(from: team.logo),
                 content: { image in
                     image.resizable()
                         .aspectRatio(contentMode: .fit)
@@ -66,7 +66,7 @@ struct RankingsTab: View {
             VStack {
                 Spacer()
                 AsyncImage(
-                    url: URL(string: "https:\(team.logo)"),
+                    url: VLRAPI.imageURL(from: team.logo),
                     content: { image in
                         image.resizable()
                             .aspectRatio(contentMode: .fit)
@@ -115,7 +115,7 @@ struct RankingsTab: View {
     }
     
     private func fetchColors() {
-        if let url = URL(string: "https:\(team.logo)") {
+        if let url = VLRAPI.imageURL(from: team.logo) {
             URLSession.shared.dataTask(with: url) { data, _, _ in
                 if let data = data, let uiImage = UIImage(data: data) {
                     uiImage.getColors { colors in
@@ -169,4 +169,3 @@ struct RankingsTab_Preview: PreviewProvider {
         return RankingsTab(team: team, searchText: "")
     }
 }
-

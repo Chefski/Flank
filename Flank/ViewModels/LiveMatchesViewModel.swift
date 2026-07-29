@@ -7,10 +7,6 @@
 
 import Foundation
 
-struct LiveAPIResponse: Codable {
-    let data: LiveDataModel
-}
-
 struct LiveDataModel: Hashable, Codable {
     let status: Int
     let segments: [LiveMatch]
@@ -23,8 +19,8 @@ struct LiveMatch: Hashable, Codable {
     let flag2: String
     let score1: String
     let score2: String
-    let team1_logo: String
-    let team2_logo: String
+    var team1_logo: String
+    var team2_logo: String
     let team1_round_ct: String
     let team1_round_t: String
     let team2_round_ct: String
@@ -36,9 +32,11 @@ struct LiveMatch: Hashable, Codable {
     let match_event: String
     let unix_timestamp: String
     let match_page: String
+    let match_id: String?
 }
 
-class ShowLive: ObservableObject {
+@MainActor
+final class ShowLive: ObservableObject {
     @Published var liveMatches: [LiveMatch] = []
     private var timer: Timer?
     
@@ -47,7 +45,7 @@ class ShowLive: ObservableObject {
     }
     
     deinit {
-        stopPeriodicFetch()
+        timer?.invalidate()
     }
     
     func startPeriodicFetch() {
@@ -64,16 +62,39 @@ class ShowLive: ObservableObject {
     }
     
     func fetch() async {
-        guard let url = URL(string: "https://vlrggapi.vercel.app/match?q=live_score") else {
-            return
-        }
-        
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let response = try JSONDecoder().decode(LiveAPIResponse.self, from: data)
-            DispatchQueue.main.async {
-                self.liveMatches = response.data.segments
+            let response = try await VLRAPI.fetch(
+                LiveDataModel.self,
+                path: "match",
+                queryItems: [URLQueryItem(name: "q", value: "live_score")]
+            )
+            var matches = response.segments
+            let requests = matches.compactMap { match -> VLRMatchLogoRequest? in
+                guard VLRAPI.imageURL(from: match.team1_logo) == nil ||
+                        VLRAPI.imageURL(from: match.team2_logo) == nil else {
+                    return nil
+                }
+                return VLRMatchLogoRequest(
+                    matchPage: match.match_page,
+                    team1: match.team1,
+                    team2: match.team2
+                )
             }
+            let logosByMatch = await VLRAPI.fetchMatchLogos(for: requests)
+
+            for index in matches.indices {
+                guard let logos = logosByMatch[matches[index].match_page] else {
+                    continue
+                }
+                if VLRAPI.imageURL(from: matches[index].team1_logo) == nil {
+                    matches[index].team1_logo = logos.team1 ?? ""
+                }
+                if VLRAPI.imageURL(from: matches[index].team2_logo) == nil {
+                    matches[index].team2_logo = logos.team2 ?? ""
+                }
+            }
+
+            liveMatches = matches
         } catch {
             print("Error fetching live matches: \(error)")
         }

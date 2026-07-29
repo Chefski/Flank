@@ -37,9 +37,7 @@ struct MatchResultsTab: View {
                                         .font(.system(size: 14, weight: .bold))
                                         .foregroundColor(.white)
                                     HStack {
-                                        Image(uiImage: UIImage(named: match.team1) ?? UIImage(named: "unknown_team")!)
-                                            .resizable()
-                                            .frame(width: 50, height: 50)
+                                        teamLogo(url: match.team1_logo)
                                         Text(match.score1)
                                             .font(.system(size: 28, weight: .bold))
                                             .foregroundColor(.white)
@@ -75,9 +73,7 @@ struct MatchResultsTab: View {
                                         .font(.system(size: 14, weight: .bold))
                                         .foregroundColor(.white)
                                     HStack {
-                                        Image(uiImage: UIImage(named: match.team2) ?? UIImage(named: "unknown_team")!)
-                                            .resizable()
-                                            .frame(width: 50, height: 50)
+                                        teamLogo(url: match.team2_logo)
                                         Text(match.score2)
                                             .font(.system(size: 28, weight: .bold))
                                             .foregroundColor(.white)
@@ -124,7 +120,7 @@ struct MatchResultsTab: View {
                         .cornerRadius(20)
                         HStack {
                             AsyncImage(
-                                url: URL(string: match.tournament_icon),
+                                url: VLRAPI.imageURL(from: match.tournament_icon),
                                 content: { image in
                                     image.resizable()
                                         .aspectRatio(contentMode: .fit)
@@ -206,13 +202,31 @@ struct MatchResultsTab: View {
         }
     }
     
+    private func teamLogo(url: String?) -> some View {
+        AsyncImage(
+            url: VLRAPI.imageURL(from: url),
+            content: { image in
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 50, height: 50)
+            },
+            placeholder: {
+                Image("unknown_team")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 50, height: 50)
+            }
+        )
+    }
+
     private func fetchColors() {
         if let cachedColor = MatchResultsTab.colorCache[match.tournament_icon] {
             self.tournamentColor = cachedColor
             return
         }
         
-        if let url = URL(string: match.tournament_icon) {
+        if let url = VLRAPI.imageURL(from: match.tournament_icon) {
             URLSession.shared.dataTask(with: url) { data, _, _ in
                 if let data = data, let uiImage = UIImage(data: data) {
                     uiImage.getColors { colors in

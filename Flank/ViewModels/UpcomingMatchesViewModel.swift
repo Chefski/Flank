@@ -7,10 +7,6 @@
 
 import Foundation
 
-struct UpcomingAPIResponse: Codable {
-    let data: UpcomingDataModel
-}
-
 struct UpcomingDataModel: Hashable, Codable {
     let status: Int
     let segments: [UpcomingMatch]
@@ -19,6 +15,8 @@ struct UpcomingDataModel: Hashable, Codable {
 struct UpcomingMatch: Hashable, Codable {
     let team1: String
     let team2: String
+    var team1_logo: String? = nil
+    var team2_logo: String? = nil
     let flag1: String
     let flag2: String
     let time_until_match: String
@@ -28,7 +26,8 @@ struct UpcomingMatch: Hashable, Codable {
     let match_page: String
 }
 
-class ShowUpcoming: ObservableObject {
+@MainActor
+final class ShowUpcoming: ObservableObject {
     @Published var upcomingMatches: [UpcomingMatch] = []
     private let cacheKey = "cachedUpcomingMatches"
     
@@ -50,17 +49,62 @@ class ShowUpcoming: ObservableObject {
     }
     
     func fetch() async {
-        guard let url = URL(string: "https://vlrggapi.vercel.app/match?q=upcoming") else {
-            return
-        }
-        
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let response = try JSONDecoder().decode(UpcomingAPIResponse.self, from: data)
-            DispatchQueue.main.async {
-                self.upcomingMatches = response.data.segments
-                self.cacheMatches()
+            let response = try await VLRAPI.fetch(
+                UpcomingDataModel.self,
+                path: "match",
+                queryItems: [URLQueryItem(name: "q", value: "upcoming")]
+            )
+            let cachedLogos = Dictionary(
+                upcomingMatches.map {
+                    (
+                        $0.match_page,
+                        VLRMatchLogos(team1: $0.team1_logo, team2: $0.team2_logo)
+                    )
+                },
+                uniquingKeysWith: { first, _ in first }
+            )
+            var matches = response.segments
+
+            for index in matches.indices {
+                guard let logos = cachedLogos[matches[index].match_page] else {
+                    continue
+                }
+                if VLRAPI.imageURL(from: matches[index].team1_logo) == nil {
+                    matches[index].team1_logo = logos.team1
+                }
+                if VLRAPI.imageURL(from: matches[index].team2_logo) == nil {
+                    matches[index].team2_logo = logos.team2
+                }
             }
+
+            let requests = matches.compactMap { match -> VLRMatchLogoRequest? in
+                guard VLRAPI.imageURL(from: match.team1_logo) == nil ||
+                        VLRAPI.imageURL(from: match.team2_logo) == nil else {
+                    return nil
+                }
+                return VLRMatchLogoRequest(
+                    matchPage: match.match_page,
+                    team1: match.team1,
+                    team2: match.team2
+                )
+            }
+            let logosByMatch = await VLRAPI.fetchMatchLogos(for: requests)
+
+            for index in matches.indices {
+                guard let logos = logosByMatch[matches[index].match_page] else {
+                    continue
+                }
+                if VLRAPI.imageURL(from: matches[index].team1_logo) == nil {
+                    matches[index].team1_logo = logos.team1
+                }
+                if VLRAPI.imageURL(from: matches[index].team2_logo) == nil {
+                    matches[index].team2_logo = logos.team2
+                }
+            }
+
+            upcomingMatches = matches
+            cacheMatches()
         } catch {
             print("Error fetching upcoming matches: \(error)")
         }

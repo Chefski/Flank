@@ -37,7 +37,7 @@ struct LiveMatchTab: View {
                         Spacer()
                         VStack {
                             AsyncImage(
-                                url: URL(string: match.team1_logo),
+                                url: VLRAPI.imageURL(from: match.team1_logo),
                                 content: { image in
                                     image.resizable()
                                         .aspectRatio(contentMode: .fit)
@@ -51,7 +51,7 @@ struct LiveMatchTab: View {
                                 }
                             )
                             .onAppear {
-                                if let url = URL(string: match.team1_logo) {
+                                if let url = VLRAPI.imageURL(from: match.team1_logo) {
                                     URLSession.shared.dataTask(with: url) { data, _, _ in
                                         if let data = data, let uiImage = UIImage(data: data) {
                                             uiImage.getColors { colors in
@@ -87,7 +87,7 @@ struct LiveMatchTab: View {
                         Spacer()
                         VStack {
                             AsyncImage(
-                                url: URL(string: match.team2_logo),
+                                url: VLRAPI.imageURL(from: match.team2_logo),
                                 content: { image in
                                     image.resizable()
                                         .aspectRatio(contentMode: .fit)
@@ -101,7 +101,7 @@ struct LiveMatchTab: View {
                                 }
                             )
                             .onAppear {
-                                if let url = URL(string: match.team2_logo) {
+                                if let url = VLRAPI.imageURL(from: match.team2_logo) {
                                     URLSession.shared.dataTask(with: url) { data, _, _ in
                                         if let data = data, let uiImage = UIImage(data: data) {
                                             uiImage.getColors { colors in
@@ -173,16 +173,6 @@ struct LiveMatchTab: View {
         }
     }
     
-    private func getTeamImage(for teamName: String) -> UIImage {
-        if let image = UIImage(named: teamName) {
-            return image
-        } else if teamName.hasSuffix("GC"), let image = UIImage(named: String(teamName.dropLast(2)).trimmingCharacters(in: .whitespaces)) {
-            return image
-        } else {
-            return UIImage(named: "unknown_team")!
-        }
-    }
-    
     private func getRoundScore(t1: String, t2: String, ct1: String, ct2: String) -> String {
         if t1 != "N/A" && ct2 != "N/A" {
             return "\(t1) - \(ct2)"
@@ -196,7 +186,7 @@ struct LiveMatchTab: View {
 
 struct LiveMatchTab_Previews: PreviewProvider {
     static var previews: some View {
-        let match = LiveMatch(team1: "FNATIC", team2: "Cloud9", flag1: "10", flag2: "5", score1: "10", score2: "5", team1_logo: "https://owcdn.net/img/62a40cc2b5e29.png", team2_logo: "https://owcdn.net/img/628addcbd509e.png", team1_round_ct: "N/A", team1_round_t: "8", team2_round_ct: "12", team2_round_t: "N/A", map_number: "2", current_map: "Bind", time_until_match: "team1_round_ct", match_series: "Regular Season: Week 3", match_event: "Champions Tour 2024: Americas Stage 1", unix_timestamp: "648379", match_page: "match_page")
+        let match = LiveMatch(team1: "FNATIC", team2: "Cloud9", flag1: "10", flag2: "5", score1: "10", score2: "5", team1_logo: "https://owcdn.net/img/62a40cc2b5e29.png", team2_logo: "https://owcdn.net/img/628addcbd509e.png", team1_round_ct: "N/A", team1_round_t: "8", team2_round_ct: "12", team2_round_t: "N/A", map_number: "2", current_map: "Bind", time_until_match: "team1_round_ct", match_series: "Regular Season: Week 3", match_event: "Champions Tour 2024: Americas Stage 1", unix_timestamp: "648379", match_page: "match_page", match_id: "123456")
         LiveMatchTab(match: match)
     }
 }

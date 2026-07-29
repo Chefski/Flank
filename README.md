@@ -37,4 +37,4 @@
 Flank relies on the following amazing resources:
 
 - [VLR.gg](https://vlr.gg) - The premier source for Valorant esports coverage, news, and match data
-- [vlrggapi](https://github.com/axsddlr/vlrggapi) - An unofficial REST API for VLR.gg by Andre Saddler
+- [Flank VLR API](https://flank-vlr-api.vercel.app/) - The v2 API powering Flank's VLR.gg data

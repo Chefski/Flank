@@ -8,10 +8,6 @@
 import Foundation
 
 struct StatsDataModel: Hashable, Codable {
-    let data: StatsSegments
-}
-
-struct StatsSegments: Hashable, Codable {
     let status: Int
     let segments: [PlayerStats]
 }
@@ -34,7 +30,8 @@ struct PlayerStats: Hashable, Codable {
     let clutch_success_percentage: String
 }
 
-class ShowStats: ObservableObject {
+@MainActor
+final class ShowStats: ObservableObject {
     @Published var stats: [PlayerStats] = []
     private let cacheKey = "cachedPlayerStats"
     
@@ -55,19 +52,18 @@ class ShowStats: ObservableObject {
         }
     }
     
-    func fetch(for region: String, for timespan: Int) async {
-        guard let url = URL(string: "https://vlrggapi.vercel.app/stats?region=\(region)&timespan=\(timespan)") else {
-            return
-        }
-        
+    func fetch(for region: String, for timespan: String) async {
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            
-            let response = try JSONDecoder().decode(StatsDataModel.self, from: data)
-            DispatchQueue.main.async {
-                self.stats = response.data.segments
-                self.cacheStats()
-            }
+            let response = try await VLRAPI.fetch(
+                StatsDataModel.self,
+                path: "stats",
+                queryItems: [
+                    URLQueryItem(name: "region", value: region),
+                    URLQueryItem(name: "timespan", value: timespan),
+                ]
+            )
+            stats = response.segments
+            cacheStats()
         } catch {
             print(error)
         }
