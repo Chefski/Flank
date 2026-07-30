@@ -11,6 +11,7 @@ import UIImageColors
 import BetterSafariView
 
 struct MatchResultsTab: View {
+    @Environment(\.colorScheme) private var colorScheme
     @State private var tournamentColor: Color = Color(red: 0, green: 0, blue: 0)
     @State private var presentingSafariView = false
     
@@ -37,7 +38,14 @@ struct MatchResultsTab: View {
                                         .font(.system(size: 14, weight: .bold))
                                         .foregroundColor(.white)
                                     HStack {
-                                        teamLogo(url: match.team1_logo)
+                                        teamLogo(
+                                            url: VLRAPI.preferredLogo(
+                                                fallback: match.team1_logo,
+                                                light: match.team1_logo_light,
+                                                dark: match.team1_logo_dark,
+                                                for: colorScheme
+                                            )
+                                        )
                                         Text(match.score1)
                                             .font(.system(size: 28, weight: .bold))
                                             .foregroundColor(.white)
@@ -73,7 +81,14 @@ struct MatchResultsTab: View {
                                         .font(.system(size: 14, weight: .bold))
                                         .foregroundColor(.white)
                                     HStack {
-                                        teamLogo(url: match.team2_logo)
+                                        teamLogo(
+                                            url: VLRAPI.preferredLogo(
+                                                fallback: match.team2_logo,
+                                                light: match.team2_logo_light,
+                                                dark: match.team2_logo_dark,
+                                                for: colorScheme
+                                            )
+                                        )
                                         Text(match.score2)
                                             .font(.system(size: 28, weight: .bold))
                                             .foregroundColor(.white)

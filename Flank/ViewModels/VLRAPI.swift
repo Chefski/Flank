@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 private struct VLRAPIResponse<Value: Decodable>: Decodable {
     let status: String
@@ -22,6 +23,8 @@ private struct VLRMatchDetails: Decodable, Sendable {
 private struct VLRMatchDetailsTeam: Decodable, Sendable {
     let name: String
     let logo: String
+    let logo_light: String?
+    let logo_dark: String?
 }
 
 struct VLRMatchLogoRequest: Hashable, Sendable {
@@ -30,9 +33,29 @@ struct VLRMatchLogoRequest: Hashable, Sendable {
     let team2: String
 }
 
-struct VLRMatchLogos: Sendable {
+struct VLRMatchLogos: Hashable, Sendable {
     let team1: String?
+    let team1Light: String?
+    let team1Dark: String?
     let team2: String?
+    let team2Light: String?
+    let team2Dark: String?
+
+    init(
+        team1: String?,
+        team1Light: String? = nil,
+        team1Dark: String? = nil,
+        team2: String?,
+        team2Light: String? = nil,
+        team2Dark: String? = nil
+    ) {
+        self.team1 = team1
+        self.team1Light = team1Light
+        self.team1Dark = team1Dark
+        self.team2 = team2
+        self.team2Light = team2Light
+        self.team2Dark = team2Dark
+    }
 }
 
 enum VLRAPIError: LocalizedError {
@@ -71,9 +94,33 @@ enum VLRAPI {
         return URL(string: value)
     }
 
+    static func preferredLogo(
+        fallback: String?,
+        light: String?,
+        dark: String?,
+        for colorScheme: ColorScheme
+    ) -> String? {
+        let candidates = colorScheme == .dark
+            ? [dark, light, fallback]
+            : [light, fallback, dark]
+
+        return candidates.compactMap { candidate in
+            imageURL(from: candidate) == nil ? nil : candidate
+        }.first
+    }
+
+    static func needsLogoVariants(
+        fallback: String?,
+        light: String?,
+        dark: String?
+    ) -> Bool {
+        imageURL(from: fallback) == nil ||
+            (imageURL(from: light) == nil && imageURL(from: dark) == nil)
+    }
+
     static func fetchMatchLogos(
         for requests: [VLRMatchLogoRequest],
-        maxConcurrentRequests: Int = 6
+        maxConcurrentRequests: Int = 1
     ) async -> [String: VLRMatchLogos] {
         let uniqueRequests = Dictionary(
             requests.map { ($0.matchPage, $0) },
@@ -84,6 +131,10 @@ enum VLRAPI {
         var result: [String: VLRMatchLogos] = [:]
 
         for startIndex in stride(from: 0, to: requests.count, by: batchSize) {
+            guard !Task.isCancelled else {
+                break
+            }
+
             let endIndex = min(startIndex + batchSize, requests.count)
             let batch = requests[startIndex..<endIndex]
             let batchResult = await withTaskGroup(
@@ -92,6 +143,10 @@ enum VLRAPI {
             ) { group in
                 for request in batch {
                     group.addTask {
+                        guard !Task.isCancelled else {
+                            return (request.matchPage, nil)
+                        }
+
                         do {
                             let logos = try await fetchMatchLogos(for: request)
                             return (request.matchPage, logos)
@@ -134,7 +189,9 @@ enum VLRAPI {
             throw VLRAPIError.invalidURL
         }
 
-        let (data, response) = try await URLSession.shared.data(from: url)
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw VLRAPIError.invalidResponse
@@ -168,9 +225,16 @@ enum VLRAPI {
             return nil
         }
 
+        let team1 = logoVariants(for: request.team1, in: teams, fallbackIndex: 0)
+        let team2 = logoVariants(for: request.team2, in: teams, fallbackIndex: 1)
+
         return VLRMatchLogos(
-            team1: logo(for: request.team1, in: teams, fallbackIndex: 0),
-            team2: logo(for: request.team2, in: teams, fallbackIndex: 1)
+            team1: team1?.fallback,
+            team1Light: team1?.light,
+            team1Dark: team1?.dark,
+            team2: team2?.fallback,
+            team2Light: team2?.light,
+            team2Dark: team2?.dark
         )
     }
 
@@ -193,18 +257,32 @@ enum VLRAPI {
             .map(String.init)
     }
 
-    private static func logo(
+    private struct LogoVariants {
+        let fallback: String?
+        let light: String?
+        let dark: String?
+    }
+
+    private static func logoVariants(
         for teamName: String,
         in teams: [VLRMatchDetailsTeam],
         fallbackIndex: Int
-    ) -> String? {
-        let logo = teams.first(where: {
+    ) -> LogoVariants? {
+        let team = teams.first(where: {
             $0.name.compare(
                 teamName,
                 options: [.caseInsensitive, .diacriticInsensitive]
             ) == .orderedSame
-        })?.logo ?? (teams.indices.contains(fallbackIndex) ? teams[fallbackIndex].logo : "")
+        }) ?? (teams.indices.contains(fallbackIndex) ? teams[fallbackIndex] : nil)
 
-        return imageURL(from: logo) == nil ? nil : logo
+        guard let team else {
+            return nil
+        }
+
+        return LogoVariants(
+            fallback: imageURL(from: team.logo) == nil ? nil : team.logo,
+            light: imageURL(from: team.logo_light) == nil ? nil : team.logo_light,
+            dark: imageURL(from: team.logo_dark) == nil ? nil : team.logo_dark
+        )
     }
 }

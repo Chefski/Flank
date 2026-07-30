@@ -180,24 +180,26 @@ struct HomeView: View {
                     }
                 }
                 .refreshable {
-                    Task {
-                        await self.liveMatches.fetch()
-                        await self.upcomingMatches.fetch()
-                        await self.pastResults.fetch()
-                    }
+                    await self.liveMatches.fetch()
+                    await self.upcomingMatches.fetch()
+                    await self.pastResults.fetch()
                 }
-                .onAppear {
-                    Task {
-                        if selectedTab.isEmpty {
-                            selectedTab = defaultTab
-                        }
-                        
-                        await self.liveMatches.fetch()
-                        await self.upcomingMatches.fetch()
-                        await self.pastResults.fetch()
-                        
-                        checkAndShowWhatsNew()
+                .task {
+                    if selectedTab.isEmpty {
+                        selectedTab = defaultTab
                     }
+
+                    await self.liveMatches.fetch()
+                    guard !Task.isCancelled else { return }
+
+                    if selectedTab == "Upcoming" {
+                        await self.upcomingMatches.fetch()
+                    } else {
+                        await self.pastResults.fetch()
+                    }
+                    guard !Task.isCancelled else { return }
+
+                    checkAndShowWhatsNew()
                 }
                 .sheet(isPresented: $showWhatsNew) {
                     WhatsNewView(whatsNew: whatsNew!)

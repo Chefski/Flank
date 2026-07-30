@@ -9,6 +9,7 @@ import SwiftUI
 import UIImageColors
 
 struct RankingsTab: View {
+    @Environment(\.colorScheme) private var colorScheme
     @State private var primaryTeamColor: Color = Color(red: 0.35, green: 0.35, blue: 0.35)
     @State private var isSheetPresented = false
     
@@ -19,13 +20,22 @@ struct RankingsTab: View {
         self.team = team
         self.searchText = searchText
     }
+
+    private var logo: String? {
+        VLRAPI.preferredLogo(
+            fallback: team.logo,
+            light: team.logo_light,
+            dark: team.logo_dark,
+            for: colorScheme
+        )
+    }
     
     var body: some View {
         HStack(spacing: 17) {
             Text(team.rank)
                 .font(.system(size: 17, weight: .bold))
             AsyncImage(
-                url: VLRAPI.imageURL(from: team.logo),
+                url: VLRAPI.imageURL(from: logo),
                 content: { image in
                     image.resizable()
                         .aspectRatio(contentMode: .fit)
@@ -38,10 +48,8 @@ struct RankingsTab: View {
                         .frame(maxWidth: 35, maxHeight: 35)
                 }
             )
-            .onAppear {
-                Task {
-                    fetchColors()
-                }
+            .task(id: logo) {
+                fetchColors()
             }
             Text(team.team)
                 .font(.system(size: 17, weight: .semibold))
@@ -66,7 +74,7 @@ struct RankingsTab: View {
             VStack {
                 Spacer()
                 AsyncImage(
-                    url: VLRAPI.imageURL(from: team.logo),
+                    url: VLRAPI.imageURL(from: logo),
                     content: { image in
                         image.resizable()
                             .aspectRatio(contentMode: .fit)
@@ -115,7 +123,7 @@ struct RankingsTab: View {
     }
     
     private func fetchColors() {
-        if let url = VLRAPI.imageURL(from: team.logo) {
+        if let url = VLRAPI.imageURL(from: logo) {
             URLSession.shared.dataTask(with: url) { data, _, _ in
                 if let data = data, let uiImage = UIImage(data: data) {
                     uiImage.getColors { colors in
@@ -163,7 +171,9 @@ struct RankingsTab_Preview: PreviewProvider {
             last_played_team_logo: "URL to Opponent Team Logo",
             record: "3-1",
             earnings: "$1,346,854",
-            logo: "//owcdn.net/img/62875027c8e06.png"
+            logo: "//owcdn.net/img/62875027c8e06.png",
+            logo_light: "//owcdn.net/img/62875027c8e06.png",
+            logo_dark: nil
         )
         
         return RankingsTab(team: team, searchText: "")

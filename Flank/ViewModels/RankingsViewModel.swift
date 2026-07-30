@@ -22,6 +22,8 @@ struct Rankings: Hashable, Codable {
     let record: String
     let earnings: String
     let logo: String
+    let logo_light: String?
+    let logo_dark: String?
     var logoURL: URL? {
         return URL(string: "https:" + logo)
     }

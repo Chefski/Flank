@@ -13,6 +13,7 @@ import BetterSafariView
 import Foundation
 
 struct UpcomingMatchTab: View {
+    @Environment(\.colorScheme) private var colorScheme
     let match: UpcomingMatch
     
     @State private var isExpanded = false
@@ -29,7 +30,14 @@ struct UpcomingMatchTab: View {
                 Spacer()
                 HStack{
                     VStack {
-                        teamLogo(url: match.team1_logo)
+                        teamLogo(
+                            url: VLRAPI.preferredLogo(
+                                fallback: match.team1_logo,
+                                light: match.team1_logo_light,
+                                dark: match.team1_logo_dark,
+                                for: colorScheme
+                            )
+                        )
                         Text(match.team1)
                             .font(.system(size: 13, weight: .bold))
                             .frame(width: 115)
@@ -62,7 +70,14 @@ struct UpcomingMatchTab: View {
                                 .stroke(.white.opacity(0.1), lineWidth: 0.5)
                         )
                     VStack {
-                        teamLogo(url: match.team2_logo)
+                        teamLogo(
+                            url: VLRAPI.preferredLogo(
+                                fallback: match.team2_logo,
+                                light: match.team2_logo_light,
+                                dark: match.team2_logo_dark,
+                                for: colorScheme
+                            )
+                        )
                         Text(match.team2)
                             .font(.system(size: 13, weight: .bold))
                             .frame(width: 115)

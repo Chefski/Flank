@@ -11,6 +11,7 @@ import BetterSafariView
 import UIImageColors
 
 struct LiveMatchTab: View {
+    @Environment(\.colorScheme) private var colorScheme
     let match: LiveMatch
     
     init(match: LiveMatch) {
@@ -21,6 +22,24 @@ struct LiveMatchTab: View {
     @State private var team2Color: Color = Color(red: 0.06, green: 0.06, blue: 0.06)
     
     @State private var presentingSafariView = false
+
+    private var team1Logo: String? {
+        VLRAPI.preferredLogo(
+            fallback: match.team1_logo,
+            light: match.team1_logo_light,
+            dark: match.team1_logo_dark,
+            for: colorScheme
+        )
+    }
+
+    private var team2Logo: String? {
+        VLRAPI.preferredLogo(
+            fallback: match.team2_logo,
+            light: match.team2_logo_light,
+            dark: match.team2_logo_dark,
+            for: colorScheme
+        )
+    }
     
     var body: some View {
         VStack {
@@ -37,7 +56,7 @@ struct LiveMatchTab: View {
                         Spacer()
                         VStack {
                             AsyncImage(
-                                url: VLRAPI.imageURL(from: match.team1_logo),
+                                url: VLRAPI.imageURL(from: team1Logo),
                                 content: { image in
                                     image.resizable()
                                         .aspectRatio(contentMode: .fit)
@@ -50,8 +69,8 @@ struct LiveMatchTab: View {
                                         .frame(width: 70, height: 70)
                                 }
                             )
-                            .onAppear {
-                                if let url = VLRAPI.imageURL(from: match.team1_logo) {
+                            .task(id: team1Logo) {
+                                if let url = VLRAPI.imageURL(from: team1Logo) {
                                     URLSession.shared.dataTask(with: url) { data, _, _ in
                                         if let data = data, let uiImage = UIImage(data: data) {
                                             uiImage.getColors { colors in
@@ -87,7 +106,7 @@ struct LiveMatchTab: View {
                         Spacer()
                         VStack {
                             AsyncImage(
-                                url: VLRAPI.imageURL(from: match.team2_logo),
+                                url: VLRAPI.imageURL(from: team2Logo),
                                 content: { image in
                                     image.resizable()
                                         .aspectRatio(contentMode: .fit)
@@ -100,8 +119,8 @@ struct LiveMatchTab: View {
                                         .frame(width: 70, height: 70)
                                 }
                             )
-                            .onAppear {
-                                if let url = VLRAPI.imageURL(from: match.team2_logo) {
+                            .task(id: team2Logo) {
+                                if let url = VLRAPI.imageURL(from: team2Logo) {
                                     URLSession.shared.dataTask(with: url) { data, _, _ in
                                         if let data = data, let uiImage = UIImage(data: data) {
                                             uiImage.getColors { colors in
