@@ -33,26 +33,29 @@ struct PlayerStats: Hashable, Codable {
 @MainActor
 final class ShowStats: ObservableObject {
     @Published var stats: [PlayerStats] = []
-    private let cacheKey = "cachedPlayerStats"
-    
-    init() {
-        loadCachedStats()
+
+    private func cacheKey(region: String, timespan: String) -> String {
+        "cachedPlayerStats.\(region).\(timespan)"
     }
-    
-    private func loadCachedStats() {
-        if let data = UserDefaults.standard.data(forKey: cacheKey),
+
+    private func loadCachedStats(region: String, timespan: String) {
+        if let data = UserDefaults.standard.data(forKey: cacheKey(region: region, timespan: timespan)),
            let cachedRankings = try? JSONDecoder().decode([PlayerStats].self, from: data) {
-            self.stats = cachedRankings
+            stats = cachedRankings
+        } else {
+            stats = []
         }
     }
     
-    private func cacheStats() {
+    private func cacheStats(region: String, timespan: String) {
         if let encodedData = try? JSONEncoder().encode(stats) {
-            UserDefaults.standard.set(encodedData, forKey: cacheKey)
+            UserDefaults.standard.set(encodedData, forKey: cacheKey(region: region, timespan: timespan))
         }
     }
     
     func fetch(for region: String, for timespan: String) async {
+        loadCachedStats(region: region, timespan: timespan)
+
         do {
             let response = try await VLRAPI.fetch(
                 StatsDataModel.self,
@@ -62,9 +65,16 @@ final class ShowStats: ObservableObject {
                     URLQueryItem(name: "timespan", value: timespan),
                 ]
             )
+
+            guard !Task.isCancelled else {
+                return
+            }
             stats = response.segments
-            cacheStats()
+            cacheStats(region: region, timespan: timespan)
         } catch {
+            guard !Task.isCancelled else {
+                return
+            }
             print(error)
         }
     }

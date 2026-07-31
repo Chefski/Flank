@@ -27,87 +27,88 @@ struct PlayerStatTab: View {
                             .font(.title3)
                             .fontWeight(.semibold)
                             .italic()
-                            .foregroundColor(.white)
+                            .foregroundStyle(.primary)
                         Text(stat.org)
                             .font(.subheadline)
-                            .foregroundColor(.white)
+                            .foregroundStyle(.secondary)
                         Spacer()
                         Text(stat.rating)
-                            .foregroundColor(.white)
+                            .foregroundStyle(.primary)
                     }
                     HStack() {
                         VStack {
-                            Text("KDA")
+                            Text("K/D")
                                 .font(.caption)
                                 .opacity(0.8)
-                                .foregroundColor(.white)
+                                .foregroundStyle(.secondary)
                             Text(stat.kill_deaths)
                                 .font(.footnote)
                                 .fontWeight(.semibold)
-                                .foregroundColor(.white)
+                                .foregroundStyle(.primary)
                         }
                         Spacer()
                         VStack {
                             Text("ACS")
                                 .font(.caption)
                                 .opacity(0.8)
-                                .foregroundColor(.white)
-                            Text(stat.kill_deaths)
+                                .foregroundStyle(.secondary)
+                            Text(stat.average_combat_score)
                                 .font(.footnote)
                                 .fontWeight(.semibold)
-                                .foregroundColor(.white)
+                                .foregroundStyle(.primary)
                         }
                         Spacer()
                         VStack {
                             Text("ADR")
                                 .font(.caption)
                                 .opacity(0.8)
-                                .foregroundColor(.white)
-                            Text(stat.kill_deaths)
+                                .foregroundStyle(.secondary)
+                            Text(stat.average_damage_per_round)
                                 .font(.footnote)
                                 .fontWeight(.semibold)
-                                .foregroundColor(.white)
+                                .foregroundStyle(.primary)
                         }
                         Spacer()
                         VStack {
                             Text("HS%")
                                 .font(.caption)
                                 .opacity(0.8)
-                                .foregroundColor(.white)
-                            Text(stat.kill_deaths)
+                                .foregroundStyle(.secondary)
+                            Text(stat.headshot_percentage)
                                 .font(.footnote)
                                 .fontWeight(.semibold)
-                                .foregroundColor(.white)
+                                .foregroundStyle(.primary)
                         }
                         Spacer()
                         VStack {
                             Text("Clutch")
                                 .font(.caption)
                                 .opacity(0.8)
-                                .foregroundColor(.white)
-                            Text(stat.kill_deaths)
+                                .foregroundStyle(.secondary)
+                            Text(stat.clutch_success_percentage)
                                 .font(.footnote)
                                 .fontWeight(.semibold)
-                                .foregroundColor(.white)
+                                .foregroundStyle(.primary)
                         }
                         Spacer()
                         VStack {
                             Text("KPR")
                                 .font(.caption)
                                 .opacity(0.8)
-                                .foregroundColor(.white)
-                            Text(stat.kill_deaths)
+                                .foregroundStyle(.secondary)
+                            Text(stat.kills_per_round)
                                 .font(.footnote)
                                 .fontWeight(.semibold)
-                                .foregroundColor(.white)
+                                .foregroundStyle(.primary)
                         }
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(Color(red: 0.18, green: 0.18, blue: 0.18))
+                .background(.thinMaterial)
                 .cornerRadius(10)
             }
+            .buttonStyle(.plain)
         }
         .sheet(isPresented: $presentingDetailedView) {
             VStack(spacing: 0) {
@@ -179,7 +180,7 @@ struct PlayerStatTab: View {
                             .fontWeight(.light)
                     }
                     HStack {
-                        Text("Kill/Death/Assist")
+                        Text("Kill/Death ratio")
                             .fontWeight(.semibold)
                         Spacer()
                         Text(stat.kill_deaths)

@@ -38,9 +38,22 @@
 		47AF05E12BD6B55100DC4128 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AF05E02BD6B55100DC4128 /* HomeView.swift */; };
 		47C02EEF2C298D0D00A093B3 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 47C02EEE2C298D0D00A093B3 /* Localizable.xcstrings */; };
 		47D203632C596082008C33BA /* FlagEmojis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D203622C596082008C33BA /* FlagEmojis.swift */; };
+		47EBE1A82BDAE89700EA2081 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 47EBE1A72BDAE89700EA2081 /* PrivacyInfo.xcprivacy */; };
 		47E1282E2BDFE6B3008A1825 /* ColorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 47E1282D2BDFE6B3008A1825 /* ColorKit */; };
 		A10203042F12345678900001 /* VLRAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10203042F12345678900002 /* VLRAPI.swift */; };
+		A10203042F12345678900003 /* MatchDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10203042F12345678900004 /* MatchDetailView.swift */; };
+		B10203042F12345678900001 /* V3MatchAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10203042F12345678900002 /* V3MatchAPITests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B10203042F1234567890000C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4774E4F62BD6A1BC009D9E4C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4774E4FD2BD6A1BC009D9E4C;
+			remoteInfo = Flank;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		471D787C2BDBD5520049641E /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
@@ -72,6 +85,9 @@
 		47EBE1A72BDAE89700EA2081 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		47F209D12C5EB83D0016B8A5 /* Flank.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Flank.entitlements; sourceTree = "<group>"; };
 		A10203042F12345678900002 /* VLRAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLRAPI.swift; sourceTree = "<group>"; };
+		A10203042F12345678900004 /* MatchDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchDetailView.swift; sourceTree = "<group>"; };
+		B10203042F12345678900002 /* V3MatchAPITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V3MatchAPITests.swift; sourceTree = "<group>"; };
+		B10203042F12345678900003 /* FlankTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlankTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,6 +106,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B10203042F12345678900007 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -97,6 +120,7 @@
 			isa = PBXGroup;
 			children = (
 				4774E5002BD6A1BC009D9E4C /* Flank */,
+				B10203042F12345678900004 /* FlankTests */,
 				4774E4FF2BD6A1BC009D9E4C /* Products */,
 			);
 			sourceTree = "<group>";
@@ -105,6 +129,7 @@
 			isa = PBXGroup;
 			children = (
 				4774E4FE2BD6A1BC009D9E4C /* Flank.app */,
+				B10203042F12345678900003 /* FlankTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -166,6 +191,7 @@
 		4774E52F2BD6A3AF009D9E4C /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				A10203042F12345678900004 /* MatchDetailView.swift */,
 				4774E5362BD6A452009D9E4C /* NewsView.swift */,
 				4774E5382BD6A45B009D9E4C /* SettingsView.swift */,
 				47AF05E02BD6B55100DC4128 /* HomeView.swift */,
@@ -174,6 +200,14 @@
 				47528E5E2D5BD73F006EC29E /* StatsView.swift */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		B10203042F12345678900004 /* FlankTests */ = {
+			isa = PBXGroup;
+			children = (
+				B10203042F12345678900002 /* V3MatchAPITests.swift */,
+			);
+			path = FlankTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -206,6 +240,24 @@
 			productReference = 4774E4FE2BD6A1BC009D9E4C /* Flank.app */;
 			productType = "com.apple.product-type.application";
 		};
+		B10203042F12345678900005 /* FlankTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B10203042F12345678900009 /* Build configuration list for PBXNativeTarget "FlankTests" */;
+			buildPhases = (
+				B10203042F12345678900006 /* Sources */,
+				B10203042F12345678900007 /* Frameworks */,
+				B10203042F12345678900008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B10203042F1234567890000D /* PBXTargetDependency */,
+			);
+			name = FlankTests;
+			productName = FlankTests;
+			productReference = B10203042F12345678900003 /* FlankTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -218,6 +270,10 @@
 				TargetAttributes = {
 					4774E4FD2BD6A1BC009D9E4C = {
 						CreatedOnToolsVersion = 15.3;
+					};
+					B10203042F12345678900005 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = 4774E4FD2BD6A1BC009D9E4C;
 					};
 				};
 			};
@@ -246,6 +302,7 @@
 			projectRoot = "";
 			targets = (
 				4774E4FD2BD6A1BC009D9E4C /* Flank */,
+				B10203042F12345678900005 /* FlankTests */,
 			);
 		};
 /* End PBXProject section */
@@ -258,6 +315,14 @@
 				4774E5092BD6A1BD009D9E4C /* Preview Assets.xcassets in Resources */,
 				4774E5062BD6A1BD009D9E4C /* Assets.xcassets in Resources */,
 				47C02EEF2C298D0D00A093B3 /* Localizable.xcstrings in Resources */,
+				47EBE1A82BDAE89700EA2081 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10203042F12345678900008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -269,6 +334,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10203042F12345678900001 /* VLRAPI.swift in Sources */,
+				A10203042F12345678900003 /* MatchDetailView.swift in Sources */,
 				4774E5242BD6A29C009D9E4C /* LiveMatchesViewModel.swift in Sources */,
 				473464362BD7E5E2003827BB /* RankingsView.swift in Sources */,
 				47AF05E12BD6B55100DC4128 /* HomeView.swift in Sources */,
@@ -290,6 +356,14 @@
 				471D787D2BDBD5520049641E /* AboutView.swift in Sources */,
 				4774E5332BD6A434009D9E4C /* UpcomingMatchTab.swift in Sources */,
 				4774E5392BD6A45B009D9E4C /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10203042F12345678900006 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10203042F12345678900001 /* V3MatchAPITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -493,6 +567,38 @@
 			};
 			name = Release;
 		};
+		B10203042F1234567890000A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = H844BPNKMP;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chefski.FlankTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Flank.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Flank";
+			};
+			name = Debug;
+		};
+		B10203042F1234567890000B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = H844BPNKMP;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chefski.FlankTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Flank.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Flank";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -514,7 +620,24 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		B10203042F12345678900009 /* Build configuration list for PBXNativeTarget "FlankTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B10203042F1234567890000A /* Debug */,
+				B10203042F1234567890000B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin PBXTargetDependency section */
+		B10203042F1234567890000D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4774E4FD2BD6A1BC009D9E4C /* Flank */;
+			targetProxy = B10203042F1234567890000C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCRemoteSwiftPackageReference section */
 		470C1DFC2C69A2DD00ED8D29 /* XCRemoteSwiftPackageReference "LookingGlassUI" */ = {

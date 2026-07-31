@@ -12,9 +12,12 @@ struct RankingsTab: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var primaryTeamColor: Color = Color(red: 0.35, green: 0.35, blue: 0.35)
     @State private var isSheetPresented = false
+    @Namespace private var sheetTransitionNamespace
     
     let team: Rankings
     let searchText: String
+
+    private let sheetTransitionID = "team-details"
     
     init(team: Rankings, searchText: String) {
         self.team = team
@@ -29,6 +32,10 @@ struct RankingsTab: View {
             for: colorScheme
         )
     }
+
+    private var teamTint: Color {
+        primaryTeamColor.opacity(colorScheme == .dark ? 0.42 : 0.18)
+    }
     
     var body: some View {
         HStack(spacing: 17) {
@@ -42,10 +49,11 @@ struct RankingsTab: View {
                         .frame(maxWidth: 35, maxHeight: 35)
                 },
                 placeholder: {
-                    Image("unknown_team")
+                    Image(systemName: "person.2.fill")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(maxWidth: 35, maxHeight: 35)
+                        .foregroundStyle(.secondary)
                 }
             )
             .task(id: logo) {
@@ -56,17 +64,26 @@ struct RankingsTab: View {
             Spacer()
             Text(team.record)
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.white.opacity(0.80))
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 20)
-        .background(primaryTeamColor.opacity(0.50))
-        .cornerRadius(20)
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(.thinMaterial)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(teamTint)
+            }
+        }
         .overlay(
             RoundedRectangle(cornerRadius: 20)
                 .inset(by: 0.5)
-                .stroke(.white.opacity(0.2), lineWidth: 1)
+                .stroke(.primary.opacity(0.14), lineWidth: 1)
         )
+        .matchedTransitionSource(id: sheetTransitionID, in: sheetTransitionNamespace) { source in
+            source.clipShape(.rect(cornerRadius: 20))
+        }
         .onTapGesture {
             self.isSheetPresented = true
         }
@@ -110,15 +127,23 @@ struct RankingsTab: View {
                         .opacity(0.75)
                     Text(team.last_played_team)
                         .font(.system(size: 15, weight: .semibold))
-                        .presentationDetents([.fraction(0.5)])
-                        .presentationBackground(Material.regular)
-                        .presentationDragIndicator(.visible)
                 }
                 .padding(.vertical, 1)
                 Spacer()
             }
             .padding(.horizontal, 30)
             .padding(.vertical, 30)
+            .navigationTransition(.zoom(sourceID: sheetTransitionID, in: sheetTransitionNamespace))
+            .presentationDetents([.fraction(0.5)])
+            .presentationBackground {
+                ZStack {
+                    Rectangle()
+                        .fill(.thinMaterial)
+                    Rectangle()
+                        .fill(teamTint)
+                }
+            }
+            .presentationDragIndicator(.visible)
         })
     }
     
@@ -132,7 +157,7 @@ struct RankingsTab: View {
                             
                             // Set the primary team color accordingly
                             if isCloseToBlack {
-                                primaryTeamColor = .white
+                                primaryTeamColor = .gray
                             } else {
                                 primaryTeamColor = Color(backgroundColor)
                             }

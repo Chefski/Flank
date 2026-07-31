@@ -12,9 +12,6 @@ struct StatsView: View {
     @State private var selectedRegion: String = "All"
     @State private var selectedTimeRange: String = "30 days"
     @State private var isLoading = false
-    @State private var selectedStat: PlayerStats? = nil
-    @State private var showingPlayerSheet = false
-    
     let regions = ["All", "Americas", "EMEA", "Pacific", "China", "International"]
     let timeRanges = ["30 days", "60 days", "90 days", "all-time"]
     
@@ -23,7 +20,7 @@ struct StatsView: View {
             ZStack {
                 VStack {
                     LinearGradient(
-                        colors: [.white.opacity(0.3), .clear],
+                        colors: [.primary.opacity(0.08), .clear],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -40,9 +37,6 @@ struct StatsView: View {
                                     ForEach(regions, id: \.self) { region in
                                         Button {
                                             selectedRegion = region
-                                            Task {
-                                                await fetchStats()
-                                            }
                                         } label: {
                                             if selectedRegion == region {
                                                 Label(region, systemImage: "checkmark")
@@ -64,9 +58,6 @@ struct StatsView: View {
                                     ForEach(timeRanges, id: \.self) { range in
                                         Button {
                                             selectedTimeRange = range
-                                            Task {
-                                                await fetchStats()
-                                            }
                                         } label: {
                                             if selectedTimeRange == range {
                                                 Label(range, systemImage: "checkmark")
@@ -92,10 +83,6 @@ struct StatsView: View {
                         ForEach(statsVM.stats, id: \.self) { stat in
                             PlayerStatTab(stat: stat)
                                 .padding(.horizontal)
-                                .onTapGesture {
-                                    selectedStat = stat
-                                    showingPlayerSheet = true
-                                }
                         }
                     }
                 }
@@ -104,26 +91,30 @@ struct StatsView: View {
                     ProgressView()
                         .scaleEffect(1.5)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.black.opacity(0.4))
+                        .background(.ultraThinMaterial)
                 }
             }
             .navigationBarTitle("Stats")
         }
         .refreshable {
-            await fetchStats()
+            await fetchStats(region: selectedRegion, timeRange: selectedTimeRange)
         }
-        .onAppear {
-            Task {
-                await fetchStats()
-            }
+        .task(id: "\(selectedRegion)|\(selectedTimeRange)") {
+            await fetchStats(region: selectedRegion, timeRange: selectedTimeRange)
         }
     }
     
-    func fetchStats() async {
+    private func fetchStats(region: String, timeRange: String) async {
         isLoading = true
-        let timespan = timeRangeToAPIValue(selectedTimeRange)
-        let regionCode = regionToCode(selectedRegion)
+        let timespan = timeRangeToAPIValue(timeRange)
+        let regionCode = regionToCode(region)
         await statsVM.fetch(for: regionCode, for: timespan)
+
+        guard !Task.isCancelled,
+              selectedRegion == region,
+              selectedTimeRange == timeRange else {
+            return
+        }
         isLoading = false
     }
     

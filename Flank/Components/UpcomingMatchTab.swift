@@ -2,292 +2,214 @@
 //  UpcomingMatchTab.swift
 //  Flank
 //
-//  Created by Patryk Radziszewski on 22/04/2024.
-//
 
 import SwiftUI
-import EventKit
-import MarqueeText
-import SafariServices
-import BetterSafariView
-import Foundation
 
 struct UpcomingMatchTab: View {
-    @Environment(\.colorScheme) private var colorScheme
-    let match: UpcomingMatch
-    
-    @State private var isExpanded = false
-    @State private var presentingSafariView = false
-    @State private var showingCalendarAlert = false
-    @State private var calendarAlertMessage = ""
-    
+    let match: V3Match
+
     var body: some View {
-        VStack(spacing: 0) {
-            LazyVStack {
-                Text("\(match.time_until_match) (@ \(formatMatchTime(unixTimestamp: match.unix_timestamp)))")
-                    .font(.system(size: 12, weight: .bold))
-                    .opacity(0.75)
-                Spacer()
-                HStack{
-                    VStack {
-                        teamLogo(
-                            url: VLRAPI.preferredLogo(
-                                fallback: match.team1_logo,
-                                light: match.team1_logo_light,
-                                dark: match.team1_logo_dark,
-                                for: colorScheme
-                            )
-                        )
-                        Text(match.team1)
-                            .font(.system(size: 13, weight: .bold))
-                            .frame(width: 115)
-                            .multilineTextAlignment(.center)
+        NavigationLink {
+            MatchDetailView(match: match)
+        } label: {
+            VStack(spacing: 14) {
+                Text(scheduleText)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.75))
+
+                HStack(spacing: 10) {
+                    MatchTeamSummary(
+                        team: match.firstTeam,
+                        logoSize: 46,
+                        matchID: match.id,
+                        teamPosition: 0
+                    )
+
+                    HStack(spacing: 7) {
+                        flag(match.firstTeam?.countryCode)
+                        Text("vs")
+                            .font(.subheadline.weight(.bold))
+                            .fixedSize()
+                        flag(match.secondTeam?.countryCode)
                     }
-                    Text(emoji(for: match.flag1))
-                        .font(.system(size: 15, weight: .bold))
-                        .frame(width: 24, height: 24)
-                        .padding(3)
-                        .background(.white.opacity(0.1))
-                        .cornerRadius(49)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 49)
-                                .inset(by: 0.25)
-                                .stroke(.white.opacity(0.1), lineWidth: 0.5)
-                        )
-                    Text("vs")
-                        .font(.system(size: 15, weight: .bold))
-                        .frame(minWidth: 24, maxWidth: 40)
-                        .fixedSize(horizontal: true, vertical: false)
-                    Text(emoji(for: match.flag2))
-                        .font(.system(size: 15, weight: .bold))
-                        .frame(width: 24, height: 24)
-                        .padding(3)
-                        .background(.white.opacity(0.1))
-                        .cornerRadius(49)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 49)
-                                .inset(by: 0.25)
-                                .stroke(.white.opacity(0.1), lineWidth: 0.5)
-                        )
-                    VStack {
-                        teamLogo(
-                            url: VLRAPI.preferredLogo(
-                                fallback: match.team2_logo,
-                                light: match.team2_logo_light,
-                                dark: match.team2_logo_dark,
-                                for: colorScheme
-                            )
-                        )
-                        Text(match.team2)
-                            .font(.system(size: 13, weight: .bold))
-                            .frame(width: 115)
-                            .multilineTextAlignment(.center)
-                    }
+                    .foregroundStyle(.white)
+
+                    MatchTeamSummary(
+                        team: match.secondTeam,
+                        logoSize: 46,
+                        matchID: match.id,
+                        teamPosition: 1
+                    )
                 }
-                Spacer()
-                Spacer()
-                VStack {
-                    Text(match.match_event)
-                        .font(.system(size: 12, weight: .semibold))
-                        .opacity(0.75)
-                    Text(match.match_series)
-                        .font(.system(size: 12, weight: .semibold))
-                        .opacity(0.75)
+
+                VStack(spacing: 2) {
+                    Text(match.event.name)
+                        .font(.caption.weight(.semibold))
+                    Text([match.event.stage, match.event.series].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.65))
+                }
+                .multilineTextAlignment(.center)
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, minHeight: 175)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background {
+                ZStack {
+                    Color(red: 0.08, green: 0.08, blue: 0.08)
+                    LinearGradient(
+                        colors: [.clear, Color(red: 0.42, green: 0.3, blue: 0.17).opacity(0.28)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
                 }
             }
-            .frame(height: 175)
-            .background(
-                LinearGradient(
-                    stops: [
-                        Gradient.Stop(color: .white.opacity(0), location: 0.00),
-                        Gradient.Stop(color: Color(red: 0.42, green: 0.3, blue: 0.17).opacity(0.2), location: 1.00),
-                    ],
-                    startPoint: UnitPoint(x: 0, y: 0.5),
-                    endPoint: UnitPoint(x: 1, y: 0.5)
-                )
-            )
-            .background(Color(red: 0.08, green: 0.08, blue: 0.08))
-            .cornerRadius(20)
-            .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .inset(by: 0.5)
-                    .stroke(.white.opacity(0.1), lineWidth: 1)
-            )
-            .zIndex(1)
-            
-            // Expanding card
-            VStack {
-                HStack {
-                    Button(action: {
-                        requestCalendarAccess { granted in
-                            if granted {
-                                if let date = convertUnixTimestampToDate(unixTimestamp: match.unix_timestamp) {
-                                    addEventToCalendar(date: date, matchTitle: "\(match.team1) vs \(match.team2)")
-                                }
-                            } else {
-                                calendarAlertMessage = "Calendar access is required to add events. Please enable it in Settings."
-                                showingCalendarAlert = true
-                            }
-                        }
-                    }) {
-                        Label("Add to Calendar", systemImage: "calendar.badge.plus")
-                            .font(.system(size: 12))
-                    }
-                    .padding()
-                    .background(.thinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .alert(isPresented: $showingCalendarAlert) {
-                        Alert(title: Text("Calendar Access"), message: Text(calendarAlertMessage), dismissButton: .default(Text("OK")))
-                    }
-                    
-                    Button(action: {
-                        self.presentingSafariView = true
-                    }) {
-                        Label("View on vlr.gg", systemImage: "arrow.up.right.square.fill")
-                            .font(.system(size: 12))
-                    }
-                    .padding()
-                    .background(.thinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .padding()
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(.white.opacity(0.12), lineWidth: 1)
             }
-            .frame(height: isExpanded ? 80 : 0)
-            .opacity(isExpanded ? 1 : 0)
-            .background(Color(red: 0.08, green: 0.08, blue: 0.08))
-            .clipShape(UnevenRoundedRectangle(cornerRadii: .init(topLeading: 0 , bottomLeading: 20, bottomTrailing: 20, topTrailing: 0)))
-            .overlay(
-                UnevenRoundedRectangle(cornerRadii: .init(topLeading: 0 , bottomLeading: 20, bottomTrailing: 20, topTrailing: 0))
-                    .inset(by: 0.5)
-                    .stroke(.white.opacity(0.1), lineWidth: 1)
-            )
-            .offset(y: -2)
-            .zIndex(0)
+            .contentShape(.rect)
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.8, blendDuration: 0), value: isExpanded)
-        .onTapGesture {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.8, blendDuration: 0)) {
-                isExpanded.toggle()
-            }
-        }
-        .sheet(isPresented: $presentingSafariView) {
-            SafariView(
-                url: URL(string: match.match_page)!,
-                configuration: SafariView.Configuration(
-                    entersReaderIfAvailable: false,
-                    barCollapsingEnabled: true
-                )
-            )
-            .preferredBarAccentColor(.clear)
-            .preferredControlAccentColor(.accentColor)
-            .dismissButtonStyle(.done)
-            .ignoresSafeArea()
-        }
-    }
-    
-    private func teamLogo(url: String?) -> some View {
-        AsyncImage(
-            url: VLRAPI.imageURL(from: url),
-            content: { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 46, height: 46)
-            },
-            placeholder: {
-                Image("unknown_team")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 46, height: 46)
-            }
-        )
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint("Opens native match details")
     }
 
-    private func convertUnixTimestampToDate(unixTimestamp: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter.date(from: unixTimestamp)
+    private var scheduleText: String {
+        if let relative = match.display.relative, !relative.isEmpty {
+            if let startsAt = match.startsAt {
+                return "\(relative) (@ \(startsAt.formatted(date: .omitted, time: .shortened)))"
+            }
+            return relative
+        }
+        if let startsAt = match.startsAt {
+            return startsAt.formatted(date: .abbreviated, time: .shortened)
+        }
+        return match.statusText ?? match.status.displayName
     }
-    
-    private func requestCalendarAccess(completion: @escaping (Bool) -> Void) {
-        let eventStore = EKEventStore()
 
-        eventStore.requestWriteOnlyAccessToEvents { granted, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    print("Error requesting calendar access: \(error.localizedDescription)")
-                    completion(false)
-                } else {
-                    completion(granted)
-                }
-            }
+    @ViewBuilder
+    private func flag(_ countryCode: String?) -> some View {
+        if let countryCode, !countryCode.isEmpty {
+            Text(countryFlag(countryCode))
+                .font(.body)
+                .frame(width: 26, height: 26)
+                .background(.white.opacity(0.1), in: Circle())
+                .overlay { Circle().stroke(.white.opacity(0.1), lineWidth: 0.5) }
+                .accessibilityLabel(countryCode.uppercased())
         }
     }
-    
-    private func addEventToCalendar(date: Date, matchTitle: String) {
-        let eventStore = EKEventStore()
-        
-        func saveEvent() {
-            let event = EKEvent(eventStore: eventStore)
-            event.title = matchTitle
-            event.startDate = date
-            event.endDate = date.addingTimeInterval(7200) // 2 Hours
-            event.calendar = eventStore.defaultCalendarForNewEvents
-            
-            do {
-                try eventStore.save(event, span: .thisEvent)
-                calendarAlertMessage = "Event added to calendar successfully!"
-                showingCalendarAlert = true
-            } catch {
-                calendarAlertMessage = "Failed to save event: \(error.localizedDescription)"
-                showingCalendarAlert = true
-            }
+
+    private func countryFlag(_ code: String) -> String {
+        let scalars = code.uppercased().unicodeScalars.compactMap {
+            UnicodeScalar(127_397 + Int($0.value))
         }
-        
-        switch EKEventStore.authorizationStatus(for: .event) {
-        case .fullAccess, .writeOnly:
-            saveEvent()
-        case .notDetermined:
-            requestCalendarAccess { granted in
-                if granted {
-                    saveEvent()
-                } else {
-                    self.calendarAlertMessage = "Calendar access denied."
-                    self.showingCalendarAlert = true
-                }
-            }
-        case .restricted, .denied:
-            calendarAlertMessage = "Calendar access is restricted or denied. Please check your settings."
-            showingCalendarAlert = true
-        @unknown default:
-            calendarAlertMessage = "Unknown calendar authorization status."
-            showingCalendarAlert = true
-        }
+        return String(String.UnicodeScalarView(scalars))
     }
-    
-    private func formatMatchTime(unixTimestamp: String) -> String {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        dateFormatter.timeZone = TimeZone.current
-        
-        if let date = dateFormatter.date(from: unixTimestamp) {
-            dateFormatter.dateFormat = "HH:mm"
-            return dateFormatter.string(from: date)
-        }
-        
-        if let timeInterval = Double(unixTimestamp) {
-            let date = Date(timeIntervalSince1970: timeInterval)
-            dateFormatter.dateFormat = "HH:mm"
-            return dateFormatter.string(from: date)
-        }
-        return "Unknown time"
+
+    private var accessibilityLabel: String {
+        "\(match.firstTeam?.name ?? "Team one") versus \(match.secondTeam?.name ?? "Team two"), \(scheduleText), \(match.event.name)"
     }
 }
 
-struct UpcomingMatchTab_Previews: PreviewProvider {
-    static var previews: some View {
-        let mockMatch = UpcomingMatch(team1: "Akave Esports GC", team2: "FNATIC", flag1: "flag_br",
-                                      flag2: "flag_us", time_until_match: "2h 45m from now",  match_series: "Regular Season: Week 4", match_event: "Champions Tour 2024: Americas Stage 1", unix_timestamp: "2024-04-17 09:00:00", match_page: "https://google.com")
-        UpcomingMatchTab(match: mockMatch)
+struct MatchTeamSummary: View {
+    let team: V3TeamRef?
+    let logoSize: CGFloat
+    let matchID: Int?
+    let teamPosition: Int
+
+    var body: some View {
+        VStack(spacing: 7) {
+            MatchTeamLogo(
+                team: team,
+                matchID: matchID,
+                teamPosition: teamPosition,
+                size: logoSize
+            )
+
+            HStack(spacing: 4) {
+                Text(team?.name ?? "Team unavailable")
+                    .font(.caption.weight(.bold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
+                    .multilineTextAlignment(.center)
+                if team?.isWinner == true {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                        .accessibilityLabel("Winner")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .foregroundStyle(.white)
+    }
+}
+
+struct MatchTeamLogo: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let team: V3TeamRef?
+    let matchID: Int?
+    let teamPosition: Int
+    let size: CGFloat
+
+    @State private var hydratedTeam: V3TeamRef?
+
+    private var logo: String? {
+        hydratedTeam?.image.preferred(for: colorScheme)
+            ?? team?.image.preferred(for: colorScheme)
+    }
+
+    var body: some View {
+        AsyncImage(url: VLRAPI.imageURL(from: logo)) { phase in
+            if let image = phase.image {
+                image
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image("unknown_team")
+                    .resizable()
+                    .scaledToFit()
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+        .task(id: hydrationTaskID) {
+            await hydrateMissingLogo()
+        }
+    }
+
+    private var hydrationTaskID: String {
+        "\(matchID ?? -1)|\(team?.name ?? "")|\(logo ?? "")"
+    }
+
+    @MainActor
+    private func hydrateMissingLogo() async {
+        guard VLRAPI.imageURL(from: logo) == nil, let matchID else { return }
+
+        do {
+            let result = try await V3MatchDetailRepository.shared.detail(id: matchID)
+            try Task.checkCancellation()
+
+            let matchingTeam = result.detail.teams.first { detailTeam in
+                if let teamID = team?.id, let detailTeamID = detailTeam.id {
+                    return teamID == detailTeamID
+                }
+                return detailTeam.name.compare(
+                    team?.name ?? "",
+                    options: [.caseInsensitive, .diacriticInsensitive]
+                ) == .orderedSame
+            }
+            let positionalTeam = result.detail.teams.indices.contains(teamPosition)
+                ? result.detail.teams[teamPosition]
+                : nil
+
+            hydratedTeam = matchingTeam ?? positionalTeam
+        } catch {
+            // Keep the bundled unknown-team logo when hydration is unavailable.
+        }
     }
 }

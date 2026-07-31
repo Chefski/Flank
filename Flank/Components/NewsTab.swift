@@ -28,35 +28,36 @@ struct NewsTab: View {
                         Text(news.title)
                             .multilineTextAlignment(.leading)
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundStyle(.primary)
                         Spacer()
                     }
                     HStack {
                         Text(news.description)
                             .multilineTextAlignment(.leading)
                             .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.white.opacity(0.80))
+                            .foregroundStyle(.secondary)
                         Spacer()
                     }
                     .padding(.bottom, 1)
                     HStack {
                         Text(news.author)
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundStyle(.primary)
                         Text(news.date)
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.white.opacity(0.75))
+                            .foregroundStyle(.secondary)
                         Spacer()
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(Color(red: 0.18, green: 0.18, blue: 0.18))
+                .background(.thinMaterial)
                 .cornerRadius(10)
             }
+            .buttonStyle(.plain)
             .sheet(isPresented: $presentingSafariView) {
                 SafariView(
-                    url: URL(string: news.url_path)!,
+                    url: VLRAPI.pageURL(from: news.url_path) ?? VLRAPI.websiteURL,
                     configuration: SafariView.Configuration(
                         entersReaderIfAvailable: false,
                         barCollapsingEnabled: true

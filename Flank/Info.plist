@@ -4,7 +4,9 @@
 <dict>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>NSCalendarsUsageDescription</key>
-	<string>Flank needs access to your calendar to schedule and manage your events.</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>Flank needs access to add upcoming matches to your calendar.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Flank uses device motion to create a 3D effect for the app logo.</string>
 </dict>
 </plist>

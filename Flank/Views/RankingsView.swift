@@ -46,7 +46,6 @@ struct RankingsView: View {
                                 ForEach(regionOptions) { region in
                                     Button {
                                         selectedRegion = region.id
-                                        fetchRankings()
                                     } label: {
                                         HStack {
                                             Image(region.image)
@@ -104,7 +103,12 @@ struct RankingsView: View {
             if selectedRegion.isEmpty {
                 selectedRegion = defaultRegion
             }
-            fetchRankings()
+        }
+        .task(id: selectedRegion) {
+            guard !selectedRegion.isEmpty else {
+                return
+            }
+            await fetchRankings(for: selectedRegion)
         }
     }
     
@@ -116,12 +120,14 @@ struct RankingsView: View {
         }
     }
     
-    private func fetchRankings() {
+    private func fetchRankings(for region: String) async {
         isLoading = true
-        Task {
-            await rankings.fetch(for: selectedRegion)
-            isLoading = false
+        await rankings.fetch(for: region)
+
+        guard !Task.isCancelled, selectedRegion == region else {
+            return
         }
+        isLoading = false
     }
 }
 

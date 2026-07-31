@@ -32,35 +32,45 @@ struct Rankings: Hashable, Codable {
 @MainActor
 final class ShowRankings: ObservableObject {
     @Published var rankings: [Rankings] = []
-    private let cacheKey = "cachedRankings"
-    
-    init() {
-        loadCachedRankings()
+
+    private func cacheKey(for region: String) -> String {
+        "cachedRankings.\(region)"
     }
-    
-    private func loadCachedRankings() {
-        if let data = UserDefaults.standard.data(forKey: cacheKey),
+
+    private func loadCachedRankings(for region: String) {
+        if let data = UserDefaults.standard.data(forKey: cacheKey(for: region)),
            let cachedRankings = try? JSONDecoder().decode([Rankings].self, from: data) {
-            self.rankings = cachedRankings
+            rankings = cachedRankings
+        } else {
+            rankings = []
         }
     }
     
-    private func cacheRankings() {
+    private func cacheRankings(for region: String) {
         if let encodedData = try? JSONEncoder().encode(rankings) {
-            UserDefaults.standard.set(encodedData, forKey: cacheKey)
+            UserDefaults.standard.set(encodedData, forKey: cacheKey(for: region))
         }
     }
     
     func fetch(for region: String) async {
+        loadCachedRankings(for: region)
+
         do {
             let response = try await VLRAPI.fetch(
                 RankingsDataModel.self,
                 path: "rankings",
                 queryItems: [URLQueryItem(name: "region", value: region)]
             )
+
+            guard !Task.isCancelled else {
+                return
+            }
             rankings = response.segments
-            cacheRankings()
+            cacheRankings(for: region)
         } catch {
+            guard !Task.isCancelled else {
+                return
+            }
             print(error)
         }
     }

@@ -9,6 +9,8 @@ import SwiftUI
 import BetterSafariView
 
 struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+
     @State private var showTermsOfService = false
     @State private var showPrivacyPolicy = false
     @State private var showAboutView = false
@@ -101,7 +103,16 @@ struct SettingsView: View {
                     Label("Contact", systemImage: "envelope.fill")
                 }
             }
-            .navigationBarTitle("Settings")
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .frame(minWidth: 44, minHeight: 44)
+                }
+            }
             .alert(isPresented: $showAlert) {
                 Alert(title: Text("Error"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
             }

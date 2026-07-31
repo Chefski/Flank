@@ -14,7 +14,6 @@ struct ContentView: View {
         case matches
         case rankings
         case news
-        case settings
         case stats
     }
     
@@ -41,13 +40,8 @@ struct ContentView: View {
                     Label(NSLocalizedString("nav_stats", comment: ""), systemImage: "chart.bar.fill")
                 }
                 .tag(Tab.stats)
-            SettingsView()
-                .tabItem {
-                    Label(NSLocalizedString("nav_settings", comment: ""), systemImage: "gearshape.2.fill")
-                }
-                .tag(Tab.settings)
         }
-        .accentColor(.white)
+        .tint(.primary)
     }
 }
 

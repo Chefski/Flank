@@ -16,7 +16,7 @@ struct NewsView: View {
             ZStack {
                 VStack {
                     LinearGradient(
-                        colors: [.white.opacity(0.3), .clear],
+                        colors: [.primary.opacity(0.08), .clear],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -38,7 +38,7 @@ struct NewsView: View {
                     ProgressView()
                         .scaleEffect(1.5)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.black.opacity(0.4))
+                        .background(.ultraThinMaterial)
                 }
             }
             .navigationBarTitle("News")
