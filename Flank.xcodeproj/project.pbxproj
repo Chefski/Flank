@@ -42,6 +42,7 @@
 		47E1282E2BDFE6B3008A1825 /* ColorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 47E1282D2BDFE6B3008A1825 /* ColorKit */; };
 		A10203042F12345678900001 /* VLRAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10203042F12345678900002 /* VLRAPI.swift */; };
 		A10203042F12345678900003 /* MatchDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10203042F12345678900004 /* MatchDetailView.swift */; };
+		C205A1012F23456789ABC001 /* ProfileViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C205A1022F23456789ABC002 /* ProfileViews.swift */; };
 		B10203042F12345678900001 /* V3MatchAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10203042F12345678900002 /* V3MatchAPITests.swift */; };
 /* End PBXBuildFile section */
 
@@ -86,6 +87,7 @@
 		47F209D12C5EB83D0016B8A5 /* Flank.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Flank.entitlements; sourceTree = "<group>"; };
 		A10203042F12345678900002 /* VLRAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLRAPI.swift; sourceTree = "<group>"; };
 		A10203042F12345678900004 /* MatchDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchDetailView.swift; sourceTree = "<group>"; };
+		C205A1022F23456789ABC002 /* ProfileViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileViews.swift; sourceTree = "<group>"; };
 		B10203042F12345678900002 /* V3MatchAPITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V3MatchAPITests.swift; sourceTree = "<group>"; };
 		B10203042F12345678900003 /* FlankTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlankTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -192,6 +194,7 @@
 			isa = PBXGroup;
 			children = (
 				A10203042F12345678900004 /* MatchDetailView.swift */,
+				C205A1022F23456789ABC002 /* ProfileViews.swift */,
 				4774E5362BD6A452009D9E4C /* NewsView.swift */,
 				4774E5382BD6A45B009D9E4C /* SettingsView.swift */,
 				47AF05E02BD6B55100DC4128 /* HomeView.swift */,
@@ -335,6 +338,7 @@
 			files = (
 				A10203042F12345678900001 /* VLRAPI.swift in Sources */,
 				A10203042F12345678900003 /* MatchDetailView.swift in Sources */,
+				C205A1012F23456789ABC001 /* ProfileViews.swift in Sources */,
 				4774E5242BD6A29C009D9E4C /* LiveMatchesViewModel.swift in Sources */,
 				473464362BD7E5E2003827BB /* RankingsView.swift in Sources */,
 				47AF05E12BD6B55100DC4128 /* HomeView.swift in Sources */,

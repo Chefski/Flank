@@ -806,8 +806,8 @@ private struct MatchHeroView: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(.primary.opacity(0.12), lineWidth: 1)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(heroAccessibilityLabel)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Match summary")
     }
 
     private var statusLabel: some View {
@@ -819,7 +819,26 @@ private struct MatchHeroView: View {
             .background(.thinMaterial, in: Capsule())
     }
 
+    @ViewBuilder
     private func team(_ team: V3TeamRef?) -> some View {
+        if let team, let teamID = team.id {
+            NavigationLink {
+                TeamProfileView(
+                    teamID: teamID,
+                    name: team.name,
+                    logo: team.image.preferred(for: colorScheme)
+                )
+            } label: {
+                teamContent(team)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens team profile")
+        } else {
+            teamContent(team)
+        }
+    }
+
+    private func teamContent(_ team: V3TeamRef?) -> some View {
         VStack(spacing: 8) {
             AsyncImage(url: VLRAPI.imageURL(from: team?.image.preferred(for: colorScheme))) { image in
                 image
@@ -860,6 +879,8 @@ private struct MatchHeroView: View {
         }
         .font(.largeTitle.bold().monospacedDigit())
         .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(heroAccessibilityLabel)
     }
 
     private var heroAccessibilityLabel: String {
@@ -970,6 +991,22 @@ private struct PlayerStatsRow: View {
     let player: V3MapPlayerStats
 
     var body: some View {
+        Group {
+            if let playerID = player.player.id {
+                NavigationLink {
+                    PlayerProfileView(playerID: playerID, name: player.player.name)
+                } label: {
+                    rowContent
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens player profile")
+            } else {
+                rowContent
+            }
+        }
+    }
+
+    private var rowContent: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 Image(systemName: "person.crop.circle.fill")

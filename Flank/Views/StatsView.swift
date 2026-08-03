@@ -80,7 +80,7 @@ struct StatsView: View {
                         }
                         .padding(.horizontal)
                         
-                        ForEach(statsVM.stats, id: \.self) { stat in
+                        ForEach(statsVM.stats, id: \.identityKey) { stat in
                             PlayerStatTab(stat: stat)
                                 .padding(.horizontal)
                         }

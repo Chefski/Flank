@@ -14,6 +14,8 @@ struct StatsDataModel: Hashable, Codable {
 
 struct PlayerStats: Hashable, Codable {
     let player: String
+    var player_id: String? = nil
+    var player_url: String? = nil
     let org: String
     let agents: [String]
     let rounds_played: String
@@ -28,6 +30,10 @@ struct PlayerStats: Hashable, Codable {
     let first_deaths_per_round: String
     let headshot_percentage: String
     let clutch_success_percentage: String
+
+    var identityKey: String {
+        player_id ?? player_url ?? "\(player)|\(org)"
+    }
 }
 
 @MainActor

@@ -17,99 +17,24 @@ struct PlayerStatTab: View {
     }
     
     var body: some View {
-        HStack {
-            Button(action: {
-                self.presentingDetailedView = true
-            }) {
-                VStack(spacing: 20) {
-                    HStack {
-                        Text(stat.player)
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                            .italic()
-                            .foregroundStyle(.primary)
-                        Text(stat.org)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(stat.rating)
-                            .foregroundStyle(.primary)
-                    }
-                    HStack() {
-                        VStack {
-                            Text("K/D")
-                                .font(.caption)
-                                .opacity(0.8)
-                                .foregroundStyle(.secondary)
-                            Text(stat.kill_deaths)
-                                .font(.footnote)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.primary)
-                        }
-                        Spacer()
-                        VStack {
-                            Text("ACS")
-                                .font(.caption)
-                                .opacity(0.8)
-                                .foregroundStyle(.secondary)
-                            Text(stat.average_combat_score)
-                                .font(.footnote)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.primary)
-                        }
-                        Spacer()
-                        VStack {
-                            Text("ADR")
-                                .font(.caption)
-                                .opacity(0.8)
-                                .foregroundStyle(.secondary)
-                            Text(stat.average_damage_per_round)
-                                .font(.footnote)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.primary)
-                        }
-                        Spacer()
-                        VStack {
-                            Text("HS%")
-                                .font(.caption)
-                                .opacity(0.8)
-                                .foregroundStyle(.secondary)
-                            Text(stat.headshot_percentage)
-                                .font(.footnote)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.primary)
-                        }
-                        Spacer()
-                        VStack {
-                            Text("Clutch")
-                                .font(.caption)
-                                .opacity(0.8)
-                                .foregroundStyle(.secondary)
-                            Text(stat.clutch_success_percentage)
-                                .font(.footnote)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.primary)
-                        }
-                        Spacer()
-                        VStack {
-                            Text("KPR")
-                                .font(.caption)
-                                .opacity(0.8)
-                                .foregroundStyle(.secondary)
-                            Text(stat.kills_per_round)
-                                .font(.footnote)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.primary)
-                        }
-                    }
+        Group {
+            if let playerID = stat.player_id.flatMap(Int.init) {
+                NavigationLink {
+                    PlayerProfileView(playerID: playerID, name: stat.player)
+                } label: {
+                    statCard
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(.thinMaterial)
-                .cornerRadius(10)
+                .accessibilityHint("Opens player profile")
+            } else {
+                Button {
+                    presentingDetailedView = true
+                } label: {
+                    statCard
+                }
+                .accessibilityHint("Shows available player statistics")
             }
-            .buttonStyle(.plain)
         }
+        .buttonStyle(.plain)
         .sheet(isPresented: $presentingDetailedView) {
             VStack(spacing: 0) {
                 HStack {
@@ -240,6 +165,55 @@ struct PlayerStatTab: View {
             .padding()
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var statCard: some View {
+        VStack(spacing: 20) {
+            HStack {
+                Text(stat.player)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .italic()
+                    .foregroundStyle(.primary)
+                Text(stat.org)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(stat.rating)
+                    .foregroundStyle(.primary)
+            }
+            HStack {
+                compactStat("K/D", stat.kill_deaths)
+                Spacer()
+                compactStat("ACS", stat.average_combat_score)
+                Spacer()
+                compactStat("ADR", stat.average_damage_per_round)
+                Spacer()
+                compactStat("HS%", stat.headshot_percentage)
+                Spacer()
+                compactStat("Clutch", stat.clutch_success_percentage)
+                Spacer()
+                compactStat("KPR", stat.kills_per_round)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .contentShape(.rect)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(stat.player), \(stat.org), rating \(stat.rating)")
+    }
+
+    private func compactStat(_ label: String, _ value: String) -> some View {
+        VStack {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value.isEmpty ? "–" : value)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.primary)
         }
     }
 }

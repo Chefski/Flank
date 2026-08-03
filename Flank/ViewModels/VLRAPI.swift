@@ -674,6 +674,31 @@ struct VLRAPIClient: @unchecked Sendable {
         return body.data
     }
 
+    func fetchNews(page: Int = 1) async throws -> (articles: [V3NewsSummary], meta: V3PageMeta) {
+        let url = try configuration.url(
+            versionPath: configuration.v3Path,
+            path: ["news"],
+            queryItems: [URLQueryItem(name: "page", value: String(page))]
+        )
+        let body: V3Response<[V3NewsSummary], V3PageMeta> = try await request(url)
+        guard body.meta.page == page else {
+            throw VLRAPIError.invalidResponse
+        }
+        return (body.data, body.meta)
+    }
+
+    func fetchNewsArticle(id: Int) async throws -> V3NewsArticle {
+        let url = try configuration.url(
+            versionPath: configuration.v3Path,
+            path: ["news", String(id)]
+        )
+        let body: V3Response<V3NewsArticle, V3EntityMeta> = try await request(url)
+        guard body.data.id == id, body.meta.id == id else {
+            throw VLRAPIError.invalidResponse
+        }
+        return body.data
+    }
+
     private func request<Value: Decodable>(_ url: URL) async throws -> Value {
         var request = URLRequest(url: url)
         request.timeoutInterval = configuration.timeout
