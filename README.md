@@ -1,3 +1,5 @@
+
+
 # Flank
 
 <p align="center">
@@ -19,6 +21,7 @@
 - 🎮 **Live Matches**: Stay updated with ongoing professional Valorant matches
 - 🏆 **Global Rankings**: Track your favorite teams' standings in real-time
 - 📰 **Latest News**: Keep up with the latest developments in the Valorant esports scene
+- 📊 **Stats**: View additional stats in the dedicated Stats tab
 - 🌙 **Dark Mode Support**: Comfortable viewing experience day and night
 - 📱 **Native iOS Experience**: Built with SwiftUI for smooth performance
 
