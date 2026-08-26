@@ -12,6 +12,7 @@ struct HomeView: View {
     @State private var searchText = ""
     @State private var listRetryToken = 0
     @State private var showingSettings = false
+    @State private var lastTrackedSearchContext = ""
 
     @StateObject private var pastResults = ShowResults()
     @StateObject private var upcomingMatches = ShowUpcoming()
@@ -130,6 +131,27 @@ struct HomeView: View {
                 }
                 .navigationTitle("Matches")
                 .searchable(text: $searchText, prompt: "Search matches…")
+                .task(id: "\(selectedTab)|\(searchText)") {
+                    guard !searchText.isEmpty else {
+                        lastTrackedSearchContext = ""
+                        return
+                    }
+                    do {
+                        try await Task.sleep(for: .milliseconds(600))
+                    } catch {
+                        return
+                    }
+                    let context = "\(selectedTab)|\(searchText)"
+                    guard context != lastTrackedSearchContext else { return }
+                    lastTrackedSearchContext = context
+                    let resultCount = selectedTab == "Upcoming"
+                        ? filteredUpcomingMatches.count
+                        : filteredPastResults.count
+                    Analytics.track(.searchPerformed(surface: "matches", resultCount: resultCount))
+                    if resultCount == 0 {
+                        Analytics.track(.searchZeroResults(surface: "matches"))
+                    }
+                }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -155,6 +177,7 @@ struct HomeView: View {
                 .padding(.horizontal)
         case .failed(let message, let retryable) where liveMatches.matches.isEmpty:
             compactStatus(message: message, retryable: retryable) {
+                Analytics.track(.retryTapped(surface: "matches_live"))
                 Task { await liveMatches.fetch() }
             }
         default:
@@ -199,7 +222,9 @@ struct HomeView: View {
 
     private func tabButton(_ title: String) -> some View {
         Button {
+            guard selectedTab != title else { return }
             selectedTab = title
+            Analytics.track(.filterChanged(surface: "matches", filter: "list", value: title.lowercased()))
         } label: {
             Text(title)
                 .font(.system(size: 24, weight: .semibold, design: .default))
@@ -234,7 +259,10 @@ struct HomeView: View {
                     Text(message)
                 } actions: {
                     if retryable {
-                        Button("Try Again") { listRetryToken += 1 }
+                        Button("Try Again") {
+                            Analytics.track(.retryTapped(surface: "matches_\(selectedTab.lowercased())"))
+                            listRetryToken += 1
+                        }
                             .buttonStyle(.borderedProminent)
                     }
                 }

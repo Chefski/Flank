@@ -63,6 +63,7 @@ struct NewsArticleView: View {
     @State private var loadState: NewsArticleLoadState = .loading
     @State private var articleSections: [NativeArticleSection] = []
     @State private var retryToken = 0
+    @State private var hasTrackedOpen = false
 
     init(summary: V3NewsSummary, client: VLRAPIClient = .init()) {
         self.summary = summary
@@ -88,6 +89,17 @@ struct NewsArticleView: View {
         .task(id: "\(summary.id)-\(retryToken)") {
             await loadArticle()
         }
+        .onAppear {
+            guard !hasTrackedOpen else { return }
+            hasTrackedOpen = true
+            Analytics.track(
+                .contentOpened(
+                    type: .article,
+                    id: String(summary.id),
+                    source: "news"
+                )
+            )
+        }
     }
 
     @MainActor
@@ -105,6 +117,13 @@ struct NewsArticleView: View {
             return
         } catch {
             guard !Task.isCancelled else { return }
+            Analytics.track(
+                .loadFailed(
+                    surface: "article_detail",
+                    category: AnalyticsErrorCategory(error),
+                    retryable: (error as? VLRAPIError)?.isRetryable ?? true
+                )
+            )
             loadState = .failed(
                 message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
                 retryable: (error as? VLRAPIError)?.isRetryable ?? true
@@ -120,6 +139,7 @@ struct NewsArticleView: View {
         } actions: {
             if retryable {
                 Button("Try Again") {
+                    Analytics.track(.retryTapped(surface: "article_detail"))
                     retryToken += 1
                 }
                 .buttonStyle(.borderedProminent)
@@ -127,6 +147,16 @@ struct NewsArticleView: View {
 
             if let url = VLRAPI.pageURL(from: summary.url) {
                 Link("Open on VLR.GG", destination: url)
+                    .simultaneousGesture(TapGesture().onEnded {
+                        Analytics.track(
+                            .externalLinkOpened(
+                                destination: "vlr",
+                                type: .article,
+                                id: String(summary.id),
+                                source: "article_error"
+                            )
+                        )
+                    })
             }
         }
     }
@@ -179,7 +209,7 @@ private struct NewsArticleContentView: View {
                 }
 
                 if !embedMedia.isEmpty {
-                    ArticleEmbedsView(media: embedMedia)
+                    ArticleEmbedsView(media: embedMedia, articleID: article.id)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -202,12 +232,25 @@ private struct NewsArticleContentView: View {
                         Label("Share Article", systemImage: "square.and.arrow.up")
                             .labelStyle(.iconOnly)
                     }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        Analytics.track(.articleShareStarted(id: String(article.id)))
+                    })
                     .accessibilityHint("Opens the share sheet")
 
                     Link(destination: externalURL) {
                         Label("Open on VLR.GG", systemImage: "safari")
                             .labelStyle(.iconOnly)
                     }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        Analytics.track(
+                            .externalLinkOpened(
+                                destination: "vlr",
+                                type: .article,
+                                id: String(article.id),
+                                source: "article_detail"
+                            )
+                        )
+                    })
                     .accessibilityHint("Opens the original article in your browser")
                 }
             }
@@ -245,6 +288,16 @@ private struct NewsArticleContentView: View {
                 if let event = article.event, !event.name.isEmpty {
                     if let eventURL = VLRAPI.pageURL(from: event.url) {
                         Link(event.name, destination: eventURL)
+                            .simultaneousGesture(TapGesture().onEnded {
+                                Analytics.track(
+                                    .externalLinkOpened(
+                                        destination: "vlr",
+                                        type: .article,
+                                        id: String(article.id),
+                                        source: "article_event"
+                                    )
+                                )
+                            })
                     } else {
                         Text(event.name)
                     }
@@ -292,6 +345,7 @@ private struct NativeArticleImage: View {
 
 private struct ArticleEmbedsView: View {
     let media: [V3ContentMedia]
+    let articleID: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -307,6 +361,16 @@ private struct ArticleEmbedsView: View {
                             .padding(12)
                             .background(.thinMaterial, in: .rect(cornerRadius: 10))
                     }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        Analytics.track(
+                            .externalLinkOpened(
+                                destination: "media",
+                                type: .article,
+                                id: String(articleID),
+                                source: "article_embed"
+                            )
+                        )
+                    })
                 }
             }
         }

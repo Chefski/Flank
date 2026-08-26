@@ -20,7 +20,7 @@ struct PlayerStatTab: View {
         Group {
             if let playerID = stat.player_id.flatMap(Int.init) {
                 NavigationLink {
-                    PlayerProfileView(playerID: playerID, name: stat.player)
+                    PlayerProfileView(playerID: playerID, name: stat.player, source: "stats")
                 } label: {
                     statCard
                 }

@@ -36,7 +36,15 @@ struct StatsView: View {
                                 Menu {
                                     ForEach(regions, id: \.self) { region in
                                         Button {
+                                            guard selectedRegion != region else { return }
                                             selectedRegion = region
+                                            Analytics.track(
+                                                .filterChanged(
+                                                    surface: "stats",
+                                                    filter: "region",
+                                                    value: regionToCode(region)
+                                                )
+                                            )
                                         } label: {
                                             if selectedRegion == region {
                                                 Label(region, systemImage: "checkmark")
@@ -57,7 +65,15 @@ struct StatsView: View {
                                 Menu {
                                     ForEach(timeRanges, id: \.self) { range in
                                         Button {
+                                            guard selectedTimeRange != range else { return }
                                             selectedTimeRange = range
+                                            Analytics.track(
+                                                .filterChanged(
+                                                    surface: "stats",
+                                                    filter: "time_range",
+                                                    value: timeRangeToAPIValue(range)
+                                                )
+                                            )
                                         } label: {
                                             if selectedTimeRange == range {
                                                 Label(range, systemImage: "checkmark")

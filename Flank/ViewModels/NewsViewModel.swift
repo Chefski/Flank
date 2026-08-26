@@ -150,11 +150,24 @@ final class ShowNews: ObservableObject {
             guard !Task.isCancelled else { return }
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             if articles.isEmpty {
+                Analytics.track(
+                    .loadFailed(
+                        surface: "news",
+                        category: AnalyticsErrorCategory(error),
+                        retryable: (error as? VLRAPIError)?.isRetryable ?? true
+                    )
+                )
                 state = .failed(
                     message: message,
                     retryable: (error as? VLRAPIError)?.isRetryable ?? true
                 )
             } else {
+                Analytics.track(
+                    .offlineCachePresented(
+                        surface: "news",
+                        category: AnalyticsErrorCategory(error)
+                    )
+                )
                 state = .cachedOffline(message)
             }
         }

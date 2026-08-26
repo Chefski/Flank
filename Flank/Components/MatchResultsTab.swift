@@ -7,14 +7,12 @@ import SwiftUI
 import UIImageColors
 
 struct MatchResultsTab: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     let match: V3Match
 
     @State private var eventColor = Color(red: 0.2, green: 0.2, blue: 0.22)
 
     private var eventLogo: String? {
-        match.event.image.preferred(for: colorScheme)
+        match.event.image.preferred(for: .dark)
     }
 
     var body: some View {

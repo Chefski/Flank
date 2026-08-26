@@ -71,6 +71,22 @@ final class ShowRankings: ObservableObject {
             guard !Task.isCancelled else {
                 return
             }
+            if rankings.isEmpty {
+                Analytics.track(
+                    .loadFailed(
+                        surface: "rankings",
+                        category: AnalyticsErrorCategory(error),
+                        retryable: (error as? VLRAPIError)?.isRetryable ?? true
+                    )
+                )
+            } else {
+                Analytics.track(
+                    .offlineCachePresented(
+                        surface: "rankings",
+                        category: AnalyticsErrorCategory(error)
+                    )
+                )
+            }
             print(error)
         }
     }

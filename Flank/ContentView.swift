@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var selectedTab: Tab = .matches
+    @State private var hasTrackedInitialTab = false
     
     enum Tab {
         case matches
@@ -18,7 +19,7 @@ struct ContentView: View {
     }
     
     var body: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: tabSelection) {
             HomeView()
                 .tabItem {
                     Label(NSLocalizedString("nav_matches", comment: ""), systemImage: "gamecontroller.fill")
@@ -42,6 +43,33 @@ struct ContentView: View {
                 .tag(Tab.stats)
         }
         .tint(.primary)
+        .onAppear {
+            guard !hasTrackedInitialTab else { return }
+            hasTrackedInitialTab = true
+            Analytics.track(.primaryTabViewed(tab: selectedTab.analyticsName))
+        }
+    }
+
+    private var tabSelection: Binding<Tab> {
+        Binding(
+            get: { selectedTab },
+            set: { newTab in
+                guard newTab != selectedTab else { return }
+                selectedTab = newTab
+                Analytics.track(.primaryTabViewed(tab: newTab.analyticsName))
+            }
+        )
+    }
+}
+
+private extension ContentView.Tab {
+    var analyticsName: String {
+        switch self {
+        case .matches: "matches"
+        case .rankings: "rankings"
+        case .news: "news"
+        case .stats: "stats"
+        }
     }
 }
 

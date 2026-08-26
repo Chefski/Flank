@@ -9,6 +9,10 @@ import SwiftUI
 
 @main
 struct FlankApp: App {
+    init() {
+        Analytics.configure()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

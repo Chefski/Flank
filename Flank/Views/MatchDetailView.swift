@@ -35,11 +35,21 @@ final class MatchDetailViewModel: ObservableObject {
         do {
             let result = try await repository.detail(id: matchID, forceRefresh: forceRefresh)
             try Task.checkCancellation()
+            if result.isStale {
+                Analytics.track(.offlineCachePresented(surface: "match_detail", category: nil))
+            }
             state = .loaded(result.detail, isStale: result.isStale)
         } catch is CancellationError {
             return
         } catch {
             guard !Task.isCancelled else { return }
+            Analytics.track(
+                .loadFailed(
+                    surface: "match_detail",
+                    category: AnalyticsErrorCategory(error),
+                    retryable: (error as? VLRAPIError)?.isRetryable ?? true
+                )
+            )
             state = .failed(
                 message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
                 retryable: (error as? VLRAPIError)?.isRetryable ?? true
@@ -113,21 +123,30 @@ struct MatchDetailView: View {
     @State private var reloadToken = 0
     @State private var showingCalendarAlert = false
     @State private var calendarAlertMessage = ""
+    @State private var hasTrackedOpen = false
 
     private let summary: V3Match?
     private let fallbackURL: String?
+    private let analyticsSource: String
 
     init(match: V3Match, repository: V3MatchDetailRepository = .shared) {
         summary = match
         fallbackURL = match.url
+        analyticsSource = match.source.rawValue
         _viewModel = StateObject(
             wrappedValue: MatchDetailViewModel(matchID: match.id, repository: repository)
         )
     }
 
-    init(matchID: Int, fallbackURL: String? = nil, repository: V3MatchDetailRepository = .shared) {
+    init(
+        matchID: Int,
+        fallbackURL: String? = nil,
+        source: String = "direct",
+        repository: V3MatchDetailRepository = .shared
+    ) {
         summary = nil
         self.fallbackURL = fallbackURL
+        analyticsSource = source
         _viewModel = StateObject(
             wrappedValue: MatchDetailViewModel(matchID: matchID, repository: repository)
         )
@@ -148,12 +167,34 @@ struct MatchDetailView: View {
                     Link(destination: url) {
                         Label("View on VLR.GG", systemImage: "arrow.up.right.square")
                     }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        Analytics.track(
+                            .externalLinkOpened(
+                                destination: "vlr",
+                                type: .match,
+                                id: String(viewModel.matchID),
+                                source: "match_detail"
+                            )
+                        )
+                    })
                     .accessibilityHint("Opens the match on VLR.GG")
                 }
             }
         }
         .task(id: "\(viewModel.matchID)-\(reloadToken)") {
             await viewModel.load(forceRefresh: reloadToken > 0)
+        }
+        .onAppear {
+            guard !hasTrackedOpen else { return }
+            hasTrackedOpen = true
+            Analytics.track(
+                .contentOpened(
+                    type: .match,
+                    id: String(viewModel.matchID),
+                    source: analyticsSource,
+                    matchState: summary?.status.rawValue
+                )
+            )
         }
         .alert("Calendar Access", isPresented: $showingCalendarAlert) {
             Button("OK", role: .cancel) {}
@@ -187,7 +228,10 @@ struct MatchDetailView: View {
                 Text(message)
             } actions: {
                 if retryable {
-                    Button("Try Again") { reloadToken += 1 }
+                    Button("Try Again") {
+                        Analytics.track(.retryTapped(surface: "match_detail"))
+                        reloadToken += 1
+                    }
                         .buttonStyle(.borderedProminent)
                 }
             }
@@ -221,7 +265,7 @@ struct MatchDetailView: View {
 
                 sectionPicker(for: detail)
 
-                Group {
+                VStack(spacing: 16) {
                     switch selectedSection {
                     case .overview:
                         overview(detail)
@@ -480,7 +524,7 @@ struct MatchDetailView: View {
         MatchDetailCard(title: "Previous meetings", symbol: "clock.arrow.circlepath") {
             ForEach(detail.headToHead) { match in
                 NavigationLink {
-                    MatchDetailView(matchID: match.id, fallbackURL: match.url)
+                    MatchDetailView(matchID: match.id, fallbackURL: match.url, source: "match_history")
                 } label: {
                     HistoryRow(match: match)
                 }
@@ -493,7 +537,8 @@ struct MatchDetailView: View {
         name: String,
         detail: String,
         url: String,
-        symbol: String
+        symbol: String,
+        source: String
     ) -> some View {
         Group {
             if let destination = VLRAPI.pageURL(from: url) {
@@ -518,6 +563,16 @@ struct MatchDetailView: View {
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .simultaneousGesture(TapGesture().onEnded {
+                    Analytics.track(
+                        .externalLinkOpened(
+                            destination: "media",
+                            type: .match,
+                            id: String(viewModel.matchID),
+                            source: source
+                        )
+                    )
+                })
                 .accessibilityHint("Opens externally")
             }
         }
@@ -534,7 +589,8 @@ struct MatchDetailView: View {
                         name: stream.name,
                         detail: stream.countryCode?.uppercased() ?? "",
                         url: stream.url,
-                        symbol: "dot.radiowaves.left.and.right"
+                        symbol: "dot.radiowaves.left.and.right",
+                        source: "stream"
                     )
 
                     if stream.id != streams.last?.id {
@@ -592,7 +648,8 @@ struct MatchDetailView: View {
                             .compactMap { $0 }
                             .joined(separator: " · "),
                         url: vod.url,
-                        symbol: "play.square.stack"
+                        symbol: "play.square.stack",
+                        source: "vod"
                     )
 
                     if vod.id != vods.last?.id {
@@ -826,7 +883,8 @@ private struct MatchHeroView: View {
                 TeamProfileView(
                     teamID: teamID,
                     name: team.name,
-                    logo: team.image.preferred(for: colorScheme)
+                    logo: team.image.preferred(for: colorScheme),
+                    source: "match_detail"
                 )
             } label: {
                 teamContent(team)
@@ -994,7 +1052,11 @@ private struct PlayerStatsRow: View {
         Group {
             if let playerID = player.player.id {
                 NavigationLink {
-                    PlayerProfileView(playerID: playerID, name: player.player.name)
+                    PlayerProfileView(
+                        playerID: playerID,
+                        name: player.player.name,
+                        source: "match_detail"
+                    )
                 } label: {
                     rowContent
                 }

@@ -52,12 +52,26 @@ class V3MatchListStore: ObservableObject {
         } catch {
             guard !Task.isCancelled else { return }
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            let surface = "matches_\(query.rawValue)"
             if matches.isEmpty {
+                Analytics.track(
+                    .loadFailed(
+                        surface: surface,
+                        category: AnalyticsErrorCategory(error),
+                        retryable: (error as? VLRAPIError)?.isRetryable ?? true
+                    )
+                )
                 state = .failed(
                     message: message,
                     retryable: (error as? VLRAPIError)?.isRetryable ?? true
                 )
             } else {
+                Analytics.track(
+                    .offlineCachePresented(
+                        surface: surface,
+                        category: AnalyticsErrorCategory(error)
+                    )
+                )
                 state = .cachedOffline(message)
             }
         }

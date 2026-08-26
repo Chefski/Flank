@@ -9,19 +9,17 @@ import UIImageColors
 
 struct LiveMatchTab: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
-
     let match: V3Match
 
     @State private var firstTeamColor = Color(red: 0.35, green: 0.35, blue: 0.35)
     @State private var secondTeamColor = Color(red: 0.08, green: 0.08, blue: 0.1)
 
     private var firstTeamLogo: String? {
-        match.firstTeam?.image.preferred(for: colorScheme)
+        match.firstTeam?.image.preferred(for: .dark)
     }
 
     private var secondTeamLogo: String? {
-        match.secondTeam?.image.preferred(for: colorScheme)
+        match.secondTeam?.image.preferred(for: .dark)
     }
 
     var body: some View {
@@ -130,7 +128,7 @@ struct LiveMatchTab: View {
     }
 
     private var eventLogo: some View {
-        AsyncImage(url: VLRAPI.imageURL(from: match.event.image.preferred(for: colorScheme))) { image in
+        AsyncImage(url: VLRAPI.imageURL(from: match.event.image.preferred(for: .dark))) { image in
             image.resizable().scaledToFit()
         } placeholder: {
             Image(systemName: "trophy.fill")

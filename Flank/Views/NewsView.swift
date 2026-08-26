@@ -49,6 +49,7 @@ struct NewsView: View {
             } actions: {
                 if retryable {
                     Button("Try Again") {
+                        Analytics.track(.retryTapped(surface: "news"))
                         Task { await news.fetch() }
                     }
                     .buttonStyle(.borderedProminent)
@@ -89,6 +90,7 @@ struct NewsView: View {
                 .font(.subheadline)
             Spacer()
             Button("Retry") {
+                Analytics.track(.retryTapped(surface: "news"))
                 Task { await news.fetch() }
             }
             .font(.subheadline.weight(.semibold))

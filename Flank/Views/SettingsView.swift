@@ -88,6 +88,11 @@ struct SettingsView: View {
                         Text("Results").tag("Results")
                     }
                     .pickerStyle(.menu)
+                    .onChange(of: defaultTab) { _, value in
+                        Analytics.track(
+                            .preferenceChanged(preference: "default_tab", value: value.lowercased())
+                        )
+                    }
                     
                     Picker("Default Region", selection: $defaultRegion) {
                         ForEach(Array(regionNames.keys.sorted()), id: \.self) { key in
@@ -95,6 +100,11 @@ struct SettingsView: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .onChange(of: defaultRegion) { _, value in
+                        Analytics.track(
+                            .preferenceChanged(preference: "default_region", value: value)
+                        )
+                    }
                 }
                 
                 Button(action: {

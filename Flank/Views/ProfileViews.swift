@@ -252,6 +252,15 @@ final class TeamProfileViewModel: ObservableObject {
         async let matchResult = capturedProfileRequest { try await client.fetchTeamMatches(id: teamID) }
         let (profile, matches) = await (profileResult, matchResult)
         guard !Task.isCancelled else { return }
+        if let error = profile.failure ?? matches.failure {
+            Analytics.track(
+                .loadFailed(
+                    surface: "team_profile",
+                    category: AnalyticsErrorCategory(error),
+                    retryable: error.isRetryable
+                )
+            )
+        }
         state = Self.resolve(profile: profile, matches: matches)
     }
 
@@ -312,6 +321,15 @@ final class PlayerProfileViewModel: ObservableObject {
         async let matchResult = capturedProfileRequest { try await client.fetchPlayerMatches(id: playerID) }
         let (profile, matches) = await (profileResult, matchResult)
         guard !Task.isCancelled else { return }
+        if let error = profile.failure ?? matches.failure {
+            Analytics.track(
+                .loadFailed(
+                    surface: "player_profile",
+                    category: AnalyticsErrorCategory(error),
+                    retryable: error.isRetryable
+                )
+            )
+        }
         state = Self.resolve(profile: profile, matches: matches)
     }
 
@@ -351,15 +369,24 @@ struct TeamProfileView: View {
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var viewModel: TeamProfileViewModel
     @State private var reloadToken = 0
+    @State private var hasTrackedOpen = false
 
     private let teamID: Int
     private let fallbackName: String
     private let fallbackLogo: String?
+    private let analyticsSource: String
 
-    init(teamID: Int, name: String, logo: String? = nil, client: VLRAPIClient = .init()) {
+    init(
+        teamID: Int,
+        name: String,
+        logo: String? = nil,
+        source: String = "direct",
+        client: VLRAPIClient = .init()
+    ) {
         self.teamID = teamID
         fallbackName = name
         fallbackLogo = logo
+        analyticsSource = source
         _viewModel = StateObject(wrappedValue: TeamProfileViewModel(teamID: teamID, client: client))
     }
 
@@ -370,8 +397,27 @@ struct TeamProfileView: View {
         }
         .navigationTitle(fallbackName)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { externalLink(path: "/team/\(teamID)", label: "View team on VLR.GG") }
+        .toolbar {
+            externalLink(
+                path: "/team/\(teamID)",
+                label: "View team on VLR.GG",
+                type: .team,
+                id: String(teamID),
+                source: "team_profile"
+            )
+        }
         .task(id: reloadToken) { await viewModel.load() }
+        .onAppear {
+            guard !hasTrackedOpen else { return }
+            hasTrackedOpen = true
+            Analytics.track(
+                .contentOpened(
+                    type: .team,
+                    id: String(teamID),
+                    source: analyticsSource
+                )
+            )
+        }
     }
 
     @ViewBuilder
@@ -382,6 +428,7 @@ struct TeamProfileView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed(let message, let retryable):
             ProfileFailureView(title: "Team unavailable", message: message, retryable: retryable) {
+                Analytics.track(.retryTapped(surface: "team_profile"))
                 reloadToken += 1
             }
         case .loaded(let profile, let matches, let profileIssue, let matchIssue):
@@ -422,13 +469,21 @@ struct TeamProfileView: View {
 struct PlayerProfileView: View {
     @StateObject private var viewModel: PlayerProfileViewModel
     @State private var reloadToken = 0
+    @State private var hasTrackedOpen = false
 
     private let playerID: Int
     private let fallbackName: String
+    private let analyticsSource: String
 
-    init(playerID: Int, name: String, client: VLRAPIClient = .init()) {
+    init(
+        playerID: Int,
+        name: String,
+        source: String = "direct",
+        client: VLRAPIClient = .init()
+    ) {
         self.playerID = playerID
         fallbackName = name
+        analyticsSource = source
         _viewModel = StateObject(wrappedValue: PlayerProfileViewModel(playerID: playerID, client: client))
     }
 
@@ -439,8 +494,27 @@ struct PlayerProfileView: View {
         }
         .navigationTitle(fallbackName)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { externalLink(path: "/player/\(playerID)", label: "View player on VLR.GG") }
+        .toolbar {
+            externalLink(
+                path: "/player/\(playerID)",
+                label: "View player on VLR.GG",
+                type: .player,
+                id: String(playerID),
+                source: "player_profile"
+            )
+        }
         .task(id: reloadToken) { await viewModel.load() }
+        .onAppear {
+            guard !hasTrackedOpen else { return }
+            hasTrackedOpen = true
+            Analytics.track(
+                .contentOpened(
+                    type: .player,
+                    id: String(playerID),
+                    source: analyticsSource
+                )
+            )
+        }
     }
 
     @ViewBuilder
@@ -451,6 +525,7 @@ struct PlayerProfileView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed(let message, let retryable):
             ProfileFailureView(title: "Player unavailable", message: message, retryable: retryable) {
+                Analytics.track(.retryTapped(surface: "player_profile"))
                 reloadToken += 1
             }
         case .loaded(let profile, let matches, let profileIssue, let matchIssue):
@@ -572,7 +647,7 @@ private struct TeamRosterCard: View {
                 ForEach(members, id: \.identityKey) { member in
                     if let id = member.id.flatMap(Int.init), member.isStaff != true {
                         NavigationLink {
-                            PlayerProfileView(playerID: id, name: member.alias)
+                            PlayerProfileView(playerID: id, name: member.alias, source: "team_profile")
                         } label: {
                             RosterRow(member: member, showsDisclosure: true)
                         }
@@ -831,10 +906,27 @@ private struct ProfileFailureView: View {
 }
 
 @ToolbarContentBuilder
-private func externalLink(path: String, label: String) -> some ToolbarContent {
+@MainActor
+private func externalLink(
+    path: String,
+    label: String,
+    type: AnalyticsContentType,
+    id: String,
+    source: String
+) -> some ToolbarContent {
     ToolbarItem(placement: .topBarTrailing) {
         if let url = VLRAPI.pageURL(from: path) {
             Link(destination: url) { Label(label, systemImage: "arrow.up.right.square") }
+                .simultaneousGesture(TapGesture().onEnded {
+                    Analytics.track(
+                        .externalLinkOpened(
+                            destination: "vlr",
+                            type: type,
+                            id: id,
+                            source: source
+                        )
+                    )
+                })
                 .accessibilityHint("Opens VLR.GG")
         }
     }

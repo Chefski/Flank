@@ -81,6 +81,22 @@ final class ShowStats: ObservableObject {
             guard !Task.isCancelled else {
                 return
             }
+            if stats.isEmpty {
+                Analytics.track(
+                    .loadFailed(
+                        surface: "stats",
+                        category: AnalyticsErrorCategory(error),
+                        retryable: (error as? VLRAPIError)?.isRetryable ?? true
+                    )
+                )
+            } else {
+                Analytics.track(
+                    .offlineCachePresented(
+                        surface: "stats",
+                        category: AnalyticsErrorCategory(error)
+                    )
+                )
+            }
             print(error)
         }
     }

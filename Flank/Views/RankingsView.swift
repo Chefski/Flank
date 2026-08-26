@@ -45,7 +45,11 @@ struct RankingsView: View {
                             HStack(spacing: 8) {
                                 ForEach(regionOptions) { region in
                                     Button {
+                                        guard selectedRegion != region.id else { return }
                                         selectedRegion = region.id
+                                        Analytics.track(
+                                            .filterChanged(surface: "rankings", filter: "region", value: region.id)
+                                        )
                                     } label: {
                                         HStack {
                                             Image(region.image)
@@ -55,7 +59,7 @@ struct RankingsView: View {
                                                 .clipped()
                                             Text(region.name)
                                                 .font(.system(size: 17, weight: .semibold))
-                                                .foregroundStyle(region.color)
+                                                .foregroundStyle(.primary)
                                         }
                                         .padding(.horizontal, 21)
                                         .padding(.vertical, 10)

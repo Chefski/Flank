@@ -149,8 +149,6 @@ struct MatchTeamSummary: View {
 }
 
 struct MatchTeamLogo: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     let team: V3TeamRef?
     let matchID: Int?
     let teamPosition: Int
@@ -159,8 +157,8 @@ struct MatchTeamLogo: View {
     @State private var hydratedTeam: V3TeamRef?
 
     private var logo: String? {
-        hydratedTeam?.image.preferred(for: colorScheme)
-            ?? team?.image.preferred(for: colorScheme)
+        hydratedTeam?.image.preferred(for: .dark)
+            ?? team?.image.preferred(for: .dark)
     }
 
     var body: some View {
