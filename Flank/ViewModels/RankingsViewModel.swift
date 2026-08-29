@@ -33,20 +33,37 @@ struct Rankings: Hashable, Codable {
 final class ShowRankings: ObservableObject {
     @Published var rankings: [Rankings] = []
 
+    private let legacyCacheKey = "cachedRankings"
+
     private func cacheKey(for region: String) -> String {
         "cachedRankings.\(region)"
     }
 
     private func loadCachedRankings(for region: String) {
         if let data = UserDefaults.standard.data(forKey: cacheKey(for: region)),
-           let cachedRankings = try? JSONDecoder().decode([Rankings].self, from: data) {
+           let cachedRankings = try? JSONDecoder().decode([Rankings].self, from: data),
+           !cachedRankings.isEmpty {
             rankings = cachedRankings
-        } else {
-            rankings = []
+            return
         }
+
+        let defaultRegion = UserDefaults.standard.string(forKey: "defaultRegion") ?? "na"
+        if region == defaultRegion,
+           let data = UserDefaults.standard.data(forKey: legacyCacheKey),
+           let cachedRankings = try? JSONDecoder().decode([Rankings].self, from: data),
+           !cachedRankings.isEmpty {
+            rankings = cachedRankings
+            return
+        }
+
+        rankings = []
     }
     
     private func cacheRankings(for region: String) {
+        guard !rankings.isEmpty else {
+            return
+        }
+
         if let encodedData = try? JSONEncoder().encode(rankings) {
             UserDefaults.standard.set(encodedData, forKey: cacheKey(for: region))
         }
@@ -65,6 +82,18 @@ final class ShowRankings: ObservableObject {
             guard !Task.isCancelled else {
                 return
             }
+
+            guard !response.segments.isEmpty else {
+                Analytics.track(
+                    .loadFailed(
+                        surface: "rankings",
+                        category: .invalidResponse,
+                        retryable: true
+                    )
+                )
+                return
+            }
+
             rankings = response.segments
             cacheRankings(for: region)
         } catch {

@@ -4,7 +4,9 @@
 //
 
 import EventKit
+import FluidGradient
 import SwiftUI
+import UIImageColors
 
 @MainActor
 final class MatchDetailViewModel: ObservableObject {
@@ -124,6 +126,7 @@ struct MatchDetailView: View {
     @State private var showingCalendarAlert = false
     @State private var calendarAlertMessage = ""
     @State private var hasTrackedOpen = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let summary: V3Match?
     private let fallbackURL: String?
@@ -213,9 +216,10 @@ struct MatchDetailView: View {
                         status: summary.status,
                         startsAt: summary.startsAt,
                         teams: summary.teams,
-                        event: summary.event
+                        event: summary.event,
+                        games: [],
+                        format: nil
                     )
-                    .padding(.horizontal)
                 }
                 ProgressView("Loading match details…")
                     .controlSize(.large)
@@ -242,30 +246,32 @@ struct MatchDetailView: View {
 
     private func loadedContent(detail: V3MatchDetail, isStale: Bool) -> some View {
         ScrollView {
-            LazyVStack(spacing: 16) {
-                if isStale {
-                    Label(
-                        "Showing a cached copy. Pull to retry when you’re online.",
-                        systemImage: "icloud.slash"
-                    )
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                    .accessibilityLabel("Offline. Showing cached match details.")
-                }
-
+            LazyVStack(spacing: 0) {
                 MatchHeroView(
                     status: detail.status,
                     startsAt: detail.startsAt,
                     teams: detail.teams,
-                    event: detail.event
+                    event: detail.event,
+                    games: detail.games,
+                    format: detail.format
                 )
 
                 sectionPicker(for: detail)
 
                 VStack(spacing: 16) {
+                    if isStale {
+                        Label(
+                            "Showing a cached copy. Pull to retry when you’re online.",
+                            systemImage: "icloud.slash"
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                        .accessibilityLabel("Offline. Showing cached match details.")
+                    }
+
                     switch selectedSection {
                     case .overview:
                         overview(detail)
@@ -282,8 +288,10 @@ struct MatchDetailView: View {
                     }
                 }
                 .id(selectedSection)
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 24)
             }
-            .padding()
         }
         .refreshable { reloadToken += 1 }
         .onChange(of: availableSections(for: detail)) { _, sections in
@@ -315,31 +323,39 @@ struct MatchDetailView: View {
 
     private func sectionPicker(for detail: V3MatchDetail) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            if #available(iOS 26.0, *) {
-                GlassEffectContainer(spacing: 8) {
-                    sectionButtons(for: detail, useGlass: true)
-                }
-            } else {
-                sectionButtons(for: detail, useGlass: false)
-            }
+            sectionButtons(for: detail)
+        }
+        .contentMargins(.horizontal, 16, for: .scrollContent)
+        .background(Color(uiColor: .systemGroupedBackground))
+        .overlay(alignment: .bottom) {
+            Divider()
         }
         .accessibilityLabel("Match detail section")
     }
 
-    private func sectionButtons(for detail: V3MatchDetail, useGlass: Bool) -> some View {
-        HStack(spacing: 8) {
+    private func sectionButtons(for detail: V3MatchDetail) -> some View {
+        HStack(spacing: 24) {
             ForEach(availableSections(for: detail)) { section in
                 Button {
-                    withAnimation(.snappy) { selectedSection = section }
+                    if reduceMotion {
+                        selectedSection = section
+                    } else {
+                        withAnimation(.snappy) { selectedSection = section }
+                    }
                 } label: {
-                    Label(section.rawValue, systemImage: section.symbol)
-                        .font(.subheadline.weight(.semibold))
+                    Text(section.rawValue)
+                        .font(.subheadline.weight(selectedSection == section ? .bold : .medium))
                         .foregroundStyle(selectedSection == section ? .primary : .secondary)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 44)
-                        .contentShape(.capsule)
+                        .padding(.top, 16)
+                        .padding(.bottom, 13)
+                        .overlay(alignment: .bottom) {
+                            Capsule()
+                                .fill(selectedSection == section ? Color.orange : .clear)
+                                .frame(height: 3)
+                        }
+                        .contentShape(.rect)
                 }
-                .modifier(SectionButtonSurface(selected: selectedSection == section, useGlass: useGlass))
+                .buttonStyle(.plain)
                 .accessibilityAddTraits(selectedSection == section ? .isSelected : [])
             }
         }
@@ -355,11 +371,10 @@ struct MatchDetailView: View {
                     addToCalendar(detail: detail, startsAt: startsAt)
                 } label: {
                     Label("Add to Calendar", systemImage: "calendar.badge.plus")
-                        .foregroundStyle(.black)
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.white)
+                .tint(.orange)
                 .accessibilityHint("Adds this match using its exact scheduled time")
             }
         }
@@ -754,29 +769,6 @@ struct MatchDetailView: View {
     }
 }
 
-private struct SectionButtonSurface: ViewModifier {
-    let selected: Bool
-    let useGlass: Bool
-
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *), useGlass {
-            content
-                .glassEffect(
-                    .regular
-                        .tint(selected ? Color.accentColor.opacity(0.45) : nil)
-                        .interactive(),
-                    in: .capsule
-                )
-        } else {
-            content
-                .background(
-                    selected ? Color.accentColor.opacity(0.3) : Color.primary.opacity(0.08),
-                    in: Capsule()
-                )
-        }
-    }
-}
-
 private struct MatchDetailCard<Content: View>: View {
     let title: String
     let symbol: String
@@ -806,139 +798,293 @@ private struct MatchDetailCard<Content: View>: View {
 }
 
 private struct MatchHeroView: View {
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let status: V3MatchStatus
     let startsAt: Date?
     let teams: [V3TeamRef]
     let event: V3EventRef
+    let games: [V3Game]
+    let format: String?
+
+    @State private var leadingColor = Color(red: 0.32, green: 0.16, blue: 0.42)
+    @State private var trailingColor = Color(red: 0.55, green: 0.24, blue: 0.08)
+
+    private var firstTeamLogo: String? {
+        teams.first?.image.preferred(for: .dark)
+    }
+
+    private var secondTeamLogo: String? {
+        teams.dropFirst().first?.image.preferred(for: .dark)
+    }
 
     var body: some View {
-        VStack(spacing: 16) {
-            HStack(spacing: 8) {
-                statusLabel
-                if let startsAt {
-                    Text(startsAt, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
-                        .font(.subheadline.weight(.semibold))
-                }
-            }
-
+        VStack(spacing: 18) {
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 12) {
-                    team(teams.first)
-                    score
-                    team(teams.dropFirst().first)
+                HStack(alignment: .center, spacing: 14) {
+                    team(teams.first, color: leadingColor)
+                    scoreSummary
+                    team(teams.dropFirst().first, color: trailingColor)
                 }
-                VStack(spacing: 14) {
-                    team(teams.first)
-                    score
-                    team(teams.dropFirst().first)
+
+                VStack(spacing: 16) {
+                    scoreSummary
+                    HStack(alignment: .top, spacing: 20) {
+                        team(teams.first, color: leadingColor)
+                        team(teams.dropFirst().first, color: trailingColor)
+                    }
+                }
+
+                VStack(spacing: 18) {
+                    scoreSummary
+                    team(teams.first, color: leadingColor)
+                    team(teams.dropFirst().first, color: trailingColor)
                 }
             }
 
-            VStack(spacing: 3) {
-                Text(event.name)
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                Text([event.stage, event.series].compactMap { $0 }.joined(separator: " · "))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+            HStack(spacing: 10) {
+                AsyncImage(url: VLRAPI.imageURL(from: event.image.preferred(for: .dark))) { image in
+                    image.resizable().scaledToFit()
+                } placeholder: {
+                    Image(systemName: "trophy.fill")
+                        .foregroundStyle(.white.opacity(0.65))
+                }
+                .frame(width: 28, height: 28)
+                .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(event.name)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                    if !eventDetail.isEmpty {
+                        Text(eventDetail)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 2)
         }
+        .foregroundStyle(.white)
         .frame(maxWidth: .infinity)
-        .padding(20)
+        .padding(.horizontal, 20)
+        .padding(.top, 22)
+        .padding(.bottom, 18)
         .background {
             ZStack {
-                LinearGradient(
-                    colors: [.indigo.opacity(0.35), .orange.opacity(0.18), .clear],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
+                Color(red: 0.055, green: 0.055, blue: 0.065)
+
+                FluidGradient(
+                    blobs: [leadingColor, trailingColor],
+                    highlights: [leadingColor, trailingColor, trailingColor, leadingColor],
+                    speed: reduceMotion ? 0 : 0.22,
+                    blur: 0.82
                 )
-                .background(.ultraThinMaterial)
+                .opacity(0.72)
+
+                LinearGradient(
+                    colors: [.black.opacity(0.08), .black.opacity(0.36)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             }
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.primary.opacity(0.12), lineWidth: 1)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(.white.opacity(0.12))
+                .frame(height: 1)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Match summary")
+        .task(id: "\(firstTeamLogo ?? "")|\(secondTeamLogo ?? "")") {
+            async let first = HeroColorSampler.sampledColor(
+                from: firstTeamLogo,
+                fallback: Color(red: 0.32, green: 0.16, blue: 0.42)
+            )
+            async let second = HeroColorSampler.sampledColor(
+                from: secondTeamLogo,
+                fallback: Color(red: 0.55, green: 0.24, blue: 0.08)
+            )
+            let colors = await (first, second)
+            guard !Task.isCancelled else { return }
+
+            if reduceMotion {
+                leadingColor = colors.0
+                trailingColor = colors.1
+            } else {
+                withAnimation(.easeInOut(duration: 0.45)) {
+                    leadingColor = colors.0
+                    trailingColor = colors.1
+                }
+            }
+        }
     }
 
     private var statusLabel: some View {
-        Text(status.displayName.uppercased())
-            .font(.caption.weight(.black))
-            .foregroundStyle(status == .live ? .red : .secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.thinMaterial, in: Capsule())
+        HStack(spacing: 5) {
+            if status == .live {
+                Circle()
+                    .fill(.white)
+                    .frame(width: 6, height: 6)
+                    .accessibilityHidden(true)
+            }
+            Text(status.displayName.uppercased())
+        }
+        .font(.caption.weight(.black))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(status == .live ? Color.red.opacity(0.82) : .white.opacity(0.13), in: Capsule())
     }
 
     @ViewBuilder
-    private func team(_ team: V3TeamRef?) -> some View {
+    private func team(_ team: V3TeamRef?, color: Color) -> some View {
         if let team, let teamID = team.id {
             NavigationLink {
                 TeamProfileView(
                     teamID: teamID,
                     name: team.name,
-                    logo: team.image.preferred(for: colorScheme),
+                    logo: team.image.preferred(for: .dark),
                     source: "match_detail"
                 )
             } label: {
-                teamContent(team)
+                teamContent(team, color: color)
             }
             .buttonStyle(.plain)
             .accessibilityHint("Opens team profile")
         } else {
-            teamContent(team)
+            teamContent(team, color: color)
         }
     }
 
-    private func teamContent(_ team: V3TeamRef?) -> some View {
-        VStack(spacing: 8) {
-            AsyncImage(url: VLRAPI.imageURL(from: team?.image.preferred(for: colorScheme))) { image in
+    private func teamContent(_ team: V3TeamRef?, color: Color) -> some View {
+        VStack(spacing: 9) {
+            AsyncImage(url: VLRAPI.imageURL(from: team?.image.preferred(for: .dark))) { image in
                 image
                     .resizable()
                     .scaledToFit()
             } placeholder: {
-                Image(systemName: "person.2.fill")
+                Image(systemName: "shield.lefthalf.filled")
                     .resizable()
                     .scaledToFit()
-                    .foregroundStyle(.secondary)
-                    .padding(10)
+                    .foregroundStyle(.white.opacity(0.72))
+                    .padding(14)
             }
-            .frame(width: 64, height: 64)
+            .frame(width: 72, height: 72)
             .accessibilityHidden(true)
 
             HStack(spacing: 5) {
                 Text(team?.name ?? "Team unavailable")
-                    .font(.headline)
+                    .font(.headline.weight(.bold))
                     .multilineTextAlignment(.center)
-                    .lineLimit(3)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
                 if team?.isWinner == true {
                     Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(.white)
                         .accessibilityHidden(true)
                 }
             }
+
+            if let teamLabel = teamLabel(team) {
+                Text(teamLabel)
+                    .font(.caption2.weight(.bold))
+                    .textCase(.uppercase)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(color.opacity(0.5), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .stroke(.white.opacity(0.2), lineWidth: 0.5)
+                    }
+            }
         }
         .frame(maxWidth: .infinity)
+        .contentShape(.rect)
     }
 
-    private var score: some View {
-        HStack(spacing: 7) {
-            Text(teams.first?.score.map(String.init) ?? "–")
-            Text(teams.first?.score == nil && teams.dropFirst().first?.score == nil ? "VS" : "–")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text(teams.dropFirst().first?.score.map(String.init) ?? "–")
+    private var scoreSummary: some View {
+        VStack(spacing: 10) {
+            statusLabel
+
+            if teams.first?.score == nil && teams.dropFirst().first?.score == nil {
+                Text("VS")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .frame(minWidth: 52, minHeight: 52)
+                    .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            } else {
+                HStack(spacing: 8) {
+                    scoreCell(teams.first?.score)
+                    Text("–")
+                        .font(.title3.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.76))
+                    scoreCell(teams.dropFirst().first?.score)
+                }
+            }
+
+            Text(matchContext)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white.opacity(0.72))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
         }
-        .font(.largeTitle.bold().monospacedDigit())
         .fixedSize()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(heroAccessibilityLabel)
+    }
+
+    private func scoreCell(_ value: Int?) -> some View {
+        Text(value.map(String.init) ?? "–")
+            .font(.largeTitle.bold().monospacedDigit())
+            .frame(minWidth: 52, minHeight: 58)
+            .background(.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(.white.opacity(0.14), lineWidth: 1)
+            }
+    }
+
+    private func teamLabel(_ team: V3TeamRef?) -> String? {
+        guard let team else { return nil }
+        let values = [team.tag, team.region]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+
+    private var matchContext: String {
+        if status == .scheduled, let startsAt {
+            return startsAt.formatted(
+                .dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute()
+            )
+        }
+
+        let activeGame = games.first(where: { $0.status == .inProgress })
+            ?? games.last(where: { $0.status == .completed })
+
+        if let activeGame {
+            return ["Map \(activeGame.number)", activeGame.mapName]
+                .compactMap { $0 }
+                .joined(separator: " · ")
+        }
+
+        if let format, !format.isEmpty {
+            return format
+        }
+
+        return status.displayName
+    }
+
+    private var eventDetail: String {
+        [event.stage, event.series]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
     }
 
     private var heroAccessibilityLabel: String {
@@ -953,6 +1099,57 @@ private struct MatchHeroView: View {
         let date = startsAt.map { ", starts \($0.formatted(date: .abbreviated, time: .shortened))" } ?? ""
         let winner = teams.first(where: \.isWinner).map { ", winner \($0.name)" } ?? ""
         return "\(status.displayName), \(matchup)\(score)\(winner)\(date), \(event.name)"
+    }
+}
+
+private enum HeroColorSampler {
+    @MainActor
+    static func sampledColor(from logo: String?, fallback: Color) async -> Color {
+        guard let url = VLRAPI.imageURL(from: logo) else { return fallback }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            try Task.checkCancellation()
+            guard let response = response as? HTTPURLResponse,
+                  (200...299).contains(response.statusCode),
+                  let image = UIImage(data: data) else {
+                return fallback
+            }
+
+            let colors: UIImageColors? = await withCheckedContinuation { continuation in
+                image.getColors { continuation.resume(returning: $0) }
+            }
+            let candidates = [colors?.background, colors?.primary, colors?.secondary, colors?.detail]
+                .compactMap { $0 }
+
+            for candidate in candidates {
+                var hue: CGFloat = 0
+                var saturation: CGFloat = 0
+                var brightness: CGFloat = 0
+                var alpha: CGFloat = 0
+                guard candidate.getHue(
+                    &hue,
+                    saturation: &saturation,
+                    brightness: &brightness,
+                    alpha: &alpha
+                ), saturation >= 0.12 else {
+                    continue
+                }
+
+                return Color(
+                    uiColor: UIColor(
+                        hue: hue,
+                        saturation: min(max(saturation, 0.38), 0.72),
+                        brightness: min(max(brightness, 0.34), 0.62),
+                        alpha: 1
+                    )
+                )
+            }
+
+            return fallback
+        } catch {
+            return fallback
+        }
     }
 }
 

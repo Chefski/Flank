@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var selectedTab: Tab = .matches
+    @State private var rankingsScrollToTopTrigger = 0
     @State private var hasTrackedInitialTab = false
     
     enum Tab {
@@ -25,7 +26,7 @@ struct ContentView: View {
                     Label(NSLocalizedString("nav_matches", comment: ""), systemImage: "gamecontroller.fill")
                 }
                 .tag(Tab.matches)
-            RankingsView()
+            RankingsView(scrollToTopTrigger: rankingsScrollToTopTrigger)
                 .tabItem {
                     Label(NSLocalizedString("nav_rankings", comment: ""), systemImage: "medal.fill")
                 }
@@ -54,7 +55,15 @@ struct ContentView: View {
         Binding(
             get: { selectedTab },
             set: { newTab in
-                guard newTab != selectedTab else { return }
+                guard newTab != selectedTab else {
+                    if newTab == .rankings {
+                        rankingsScrollToTopTrigger += 1
+                    }
+                    return
+                }
+                if newTab == .rankings {
+                    rankingsScrollToTopTrigger += 1
+                }
                 selectedTab = newTab
                 Analytics.track(.primaryTabViewed(tab: newTab.analyticsName))
             }

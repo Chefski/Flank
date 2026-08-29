@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import WhatsNewKit
 
 struct HomeView: View {
     @AppStorage("defaultTab") private var defaultTab = "Upcoming"
@@ -17,29 +16,6 @@ struct HomeView: View {
     @StateObject private var pastResults = ShowResults()
     @StateObject private var upcomingMatches = ShowUpcoming()
     @StateObject private var liveMatches = ShowLive()
-
-    @State private var showWhatsNew = false
-
-    @State private var whatsNew: WhatsNew? = WhatsNew(
-        title: "What's new?",
-        features: [
-            .init(
-                image: .init(systemName: "magnifyingglass", foregroundColor: .blue),
-                title: "Search for matches",
-                subtitle: "Find upcoming and past matches with the search bar instead of scrolling!"
-            ),
-            .init(
-                image: .init(systemName: "sparkles", foregroundColor: .purple),
-                title: "Redesigned result tabs",
-                subtitle: "Result tabs have been redesigned to a more colorful and modern look!"
-            ),
-            .init(
-                image: .init(systemName: "slider.horizontal.3", foregroundColor: .green),
-                title: "Choose your defaults",
-                subtitle: "You can choose to see upcoming matches or results at launch."
-            )
-        ]
-    )
 
     private var filteredUpcomingMatches: [V3Match] {
         filtered(upcomingMatches.matches)
@@ -101,8 +77,6 @@ struct HomeView: View {
                         selectedTab = defaultTab == "Results" ? "Results" : "Upcoming"
                     }
                     await liveMatches.fetch()
-                    guard !Task.isCancelled else { return }
-                    checkAndShowWhatsNew()
                 }
                 .task(id: "\(selectedTab)-\(listRetryToken)") {
                     if selectedTab == "Upcoming" {
@@ -119,11 +93,6 @@ struct HomeView: View {
                             return
                         }
                         await liveMatches.fetch()
-                    }
-                }
-                .sheet(isPresented: $showWhatsNew) {
-                    if let whatsNew {
-                        WhatsNewView(whatsNew: whatsNew)
                     }
                 }
                 .sheet(isPresented: $showingSettings) {
@@ -317,18 +286,6 @@ struct HomeView: View {
                 || match.event.name.localizedCaseInsensitiveContains(searchText)
                 || match.event.stage?.localizedCaseInsensitiveContains(searchText) == true
                 || match.event.series?.localizedCaseInsensitiveContains(searchText) == true
-        }
-    }
-
-    private func checkAndShowWhatsNew() {
-        let currentVersion = Bundle.main.object(
-            forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? ""
-        let lastVersionPrompted = UserDefaults.standard.string(forKey: "LastWhatsNewVersion")
-
-        if lastVersionPrompted != currentVersion {
-            showWhatsNew = true
-            UserDefaults.standard.set(currentVersion, forKey: "LastWhatsNewVersion")
         }
     }
 }

@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct RankingsView: View {
+    private static let scrollTopID = "rankings-scroll-top"
+
     private struct RegionOption: Identifiable {
         let id: String
         let name: String
@@ -22,6 +24,12 @@ struct RankingsView: View {
     
     @State private var showingRegionPicker = true
     @State private var searchText = ""
+
+    let scrollToTopTrigger: Int
+
+    init(scrollToTopTrigger: Int = 0) {
+        self.scrollToTopTrigger = scrollToTopTrigger
+    }
     
     private let regionOptions = [
         RegionOption(id: "na", name: "North America", image: "NA", color: Color(red: 0.05, green: 0.7, blue: 0.59)),
@@ -75,8 +83,10 @@ struct RankingsView: View {
                                 }
                             }
                             .padding(.horizontal)
+                            .padding(.vertical, 8)
                         }
                     }
+                    .padding(.vertical, -8)
                     .transition(
                         .asymmetric(
                             insertion: .push(from: .top),
@@ -86,22 +96,52 @@ struct RankingsView: View {
                 }
             }
             
-            ScrollView(showsIndicators: false) {
-                if isLoading {
-                    ProgressView()
-                        .padding()
-                } else {
-                    LazyVStack {
-                        ForEach(filteredRankings, id: \.self) { ranking in
-                            RankingsTab(team: ranking, searchText: searchText)
+            ScrollViewReader { scrollProxy in
+                ScrollView(showsIndicators: false) {
+                    Color.clear
+                        .frame(height: 0)
+                        .id(Self.scrollTopID)
+
+                    if isLoading {
+                        ProgressView()
+                            .padding()
+                    } else {
+                        LazyVStack {
+                            ForEach(filteredRankings, id: \.self) { ranking in
+                                RankingsTab(team: ranking, searchText: searchText)
+                            }
                         }
+                        .padding(.horizontal, 8)
+                        .padding(.top)
+                        .padding(.bottom, 120)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.top)
+                }
+                .ignoresSafeArea(.container, edges: .bottom)
+                .mask {
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [.clear, .black],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 24)
+
+                        Rectangle()
+                            .fill(.black)
+                    }
+                }
+                .onChange(of: scrollToTopTrigger) {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        scrollProxy.scrollTo(Self.scrollTopID, anchor: .top)
+                    }
                 }
             }
-            .searchable(text: $searchText, prompt: "Search for a team")
             .navigationTitle("Rankings")
+        }
+        .overlay(alignment: .bottom) {
+            searchPill
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
         }
         .onAppear {
             if selectedRegion.isEmpty {
@@ -115,6 +155,42 @@ struct RankingsView: View {
             await fetchRankings(for: selectedRegion)
         }
     }
+
+    private var searchPill: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+
+            TextField("Search teams", text: $searchText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .onSubmit {
+                    guard !searchText.isEmpty else { return }
+                    Analytics.track(
+                        .searchPerformed(surface: "rankings", resultCount: filteredRankings.count)
+                    )
+                    if filteredRankings.isEmpty {
+                        Analytics.track(.searchZeroResults(surface: "rankings"))
+                    }
+                }
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear team search")
+            }
+        }
+        .padding(.horizontal, 18)
+        .frame(maxWidth: 360, minHeight: 52)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .accessibilityElement(children: .contain)
+    }
     
     private var filteredRankings: [Rankings] {
         if searchText.isEmpty {
@@ -126,12 +202,13 @@ struct RankingsView: View {
     
     private func fetchRankings(for region: String) async {
         isLoading = true
-        await rankings.fetch(for: region)
-
-        guard !Task.isCancelled, selectedRegion == region else {
-            return
+        defer {
+            if selectedRegion == region {
+                isLoading = false
+            }
         }
-        isLoading = false
+
+        await rankings.fetch(for: region)
     }
 }
 

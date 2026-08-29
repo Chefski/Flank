@@ -51,7 +51,7 @@ struct SettingsView: View {
                     }
                     .sheet(isPresented: $showTermsOfService) {
                         SafariView(
-                            url: URL(string: "https://www.chefski.dev/flank-terms-conditions")!,
+                            url: URL(string: "https://chef.ski/flank-terms-conditions")!,
                             configuration: SafariView.Configuration(
                                 entersReaderIfAvailable: false,
                                 barCollapsingEnabled: true
@@ -69,7 +69,7 @@ struct SettingsView: View {
                     }
                     .sheet(isPresented: $showPrivacyPolicy) {
                         SafariView(
-                            url: URL(string: "https://www.chefski.dev/flank-privacy-policy")!,
+                            url: URL(string: "https://chef.ski/flank-privacy-policy")!,
                             configuration: SafariView.Configuration(
                                 entersReaderIfAvailable: false,
                                 barCollapsingEnabled: true
@@ -130,7 +130,7 @@ struct SettingsView: View {
     }
     
     private func openMail() {
-        let email = "p.szewski@proton.me"
+        let email = "patryk@chef.ski"
         let subject = "Contact from Flank app"
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
         let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"

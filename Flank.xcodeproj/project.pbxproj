@@ -24,7 +24,6 @@
 		4774E5112BD6A1D5009D9E4C /* FluidGradient in Frameworks */ = {isa = PBXBuildFile; productRef = 4774E5102BD6A1D5009D9E4C /* FluidGradient */; };
 		4774E5142BD6A1DC009D9E4C /* BetterSafariView in Frameworks */ = {isa = PBXBuildFile; productRef = 4774E5132BD6A1DC009D9E4C /* BetterSafariView */; };
 		4774E5172BD6A1E4009D9E4C /* MarqueeText in Frameworks */ = {isa = PBXBuildFile; productRef = 4774E5162BD6A1E4009D9E4C /* MarqueeText */; };
-		4774E51A2BD6A1EF009D9E4C /* WhatsNewKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4774E5192BD6A1EF009D9E4C /* WhatsNewKit */; };
 		4774E51D2BD6A1FD009D9E4C /* SmoothGradient in Frameworks */ = {isa = PBXBuildFile; productRef = 4774E51C2BD6A1FD009D9E4C /* SmoothGradient */; };
 		4774E5242BD6A29C009D9E4C /* LiveMatchesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4774E5232BD6A29C009D9E4C /* LiveMatchesViewModel.swift */; };
 		4774E5262BD6A2B3009D9E4C /* NewsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4774E5252BD6A2B3009D9E4C /* NewsViewModel.swift */; };
@@ -103,7 +102,6 @@
 				A15086802F26082600000001 /* PostHog in Frameworks */,
 				479B27402BDE6FFD0005CAEF /* UIImageColors in Frameworks */,
 				470C1DFE2C69A2DD00ED8D29 /* LookingGlassUI in Frameworks */,
-				4774E51A2BD6A1EF009D9E4C /* WhatsNewKit in Frameworks */,
 				4774E5172BD6A1E4009D9E4C /* MarqueeText in Frameworks */,
 				4774E51D2BD6A1FD009D9E4C /* SmoothGradient in Frameworks */,
 				4774E5112BD6A1D5009D9E4C /* FluidGradient in Frameworks */,
@@ -239,7 +237,6 @@
 				4774E5102BD6A1D5009D9E4C /* FluidGradient */,
 				4774E5132BD6A1DC009D9E4C /* BetterSafariView */,
 				4774E5162BD6A1E4009D9E4C /* MarqueeText */,
-				4774E5192BD6A1EF009D9E4C /* WhatsNewKit */,
 				4774E51C2BD6A1FD009D9E4C /* SmoothGradient */,
 				479B273F2BDE6FFD0005CAEF /* UIImageColors */,
 				47E1282D2BDFE6B3008A1825 /* ColorKit */,
@@ -301,7 +298,6 @@
 				4774E50F2BD6A1D5009D9E4C /* XCRemoteSwiftPackageReference "FluidGradient" */,
 				4774E5122BD6A1DC009D9E4C /* XCRemoteSwiftPackageReference "BetterSafariView" */,
 				4774E5152BD6A1E4009D9E4C /* XCRemoteSwiftPackageReference "MarqueeText" */,
-				4774E5182BD6A1EF009D9E4C /* XCRemoteSwiftPackageReference "WhatsNewKit" */,
 				4774E51B2BD6A1FD009D9E4C /* XCRemoteSwiftPackageReference "SmoothGradient" */,
 				479B273E2BDE6FFD0005CAEF /* XCRemoteSwiftPackageReference "UIImageColors" */,
 				47E1282C2BDFE6B2008A1825 /* XCRemoteSwiftPackageReference "ColorKit" */,
@@ -692,14 +688,6 @@
 				kind = branch;
 			};
 		};
-		4774E5182BD6A1EF009D9E4C /* XCRemoteSwiftPackageReference "WhatsNewKit" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/SvenTiigi/WhatsNewKit.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.2.0;
-			};
-		};
 		4774E51B2BD6A1FD009D9E4C /* XCRemoteSwiftPackageReference "SmoothGradient" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/raymondjavaxx/SmoothGradient.git";
@@ -751,11 +739,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4774E5152BD6A1E4009D9E4C /* XCRemoteSwiftPackageReference "MarqueeText" */;
 			productName = MarqueeText;
-		};
-		4774E5192BD6A1EF009D9E4C /* WhatsNewKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 4774E5182BD6A1EF009D9E4C /* XCRemoteSwiftPackageReference "WhatsNewKit" */;
-			productName = WhatsNewKit;
 		};
 		4774E51C2BD6A1FD009D9E4C /* SmoothGradient */ = {
 			isa = XCSwiftPackageProductDependency;
