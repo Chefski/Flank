@@ -22,6 +22,22 @@
 - 🌙 **Dark Mode Support**: Comfortable viewing experience day and night
 - 📱 **Native iOS Experience**: Built with SwiftUI for smooth performance
 
+## Development and releases
+
+- `dev` is the default branch and the integration point for ongoing work.
+- `main` is the release branch watched by Xcode Cloud.
+- To create a new build, update `dev`, then fast-forward `main` to `origin/dev` and push `main`:
+
+  ```sh
+  git fetch origin
+  git switch main
+  git merge --ff-only origin/dev
+  git push origin main
+  git switch dev
+  ```
+
+Keeping release-only changes out of `main` ensures every Xcode Cloud build corresponds to a tested `dev` commit.
+
 ## Screenshots
 
 <p align="center">

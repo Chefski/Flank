@@ -2,6 +2,7 @@
 
 - Source visual truth: `/var/folders/wf/z4gtsgpn0_vbfyjx5jz7z4pw0000gn/T/codex-clipboard-d6aa0f84-21d5-47ac-829b-03acff24a587.png`
 - Implementation screenshot: `/Users/chefski/.codex/visualizations/2026/08/29/01a04db3-4dea-7241-bb6c-1ab5bb2ac075/match-detail-completed-dark-final-raw.png`
+- Winner treatment screenshot: `/Users/chefski/.codex/visualizations/2026/08/29/01a04db3-4dea-7241-bb6c-1ab5bb2ac075/match-detail-completed-winner-green.jpg`
 - Side-by-side comparison: `/Users/chefski/.codex/visualizations/2026/08/29/01a04db3-4dea-7241-bb6c-1ab5bb2ac075/design-qa-comparison-full.png`
 - Viewport: iPhone 17 Pro, iOS 26.5, 402 x 874 points at 3x
 - Source dimensions: 1498 x 1069 pixels; selected rightmost frame approximately 505 x 1001 pixels within the concept board
@@ -24,6 +25,7 @@ No actionable P0, P1, or P2 differences remain.
 - Fonts and typography: the implementation intentionally uses San Francisco and Dynamic Type instead of imitating the concept's display treatment. Weight, hierarchy, monospaced scores, wrapping, and scaling remain native and readable. AX XXL switches the hero to a vertical composition without truncating team names.
 - Spacing and layout rhythm: the hero and selector are full width, the score is optically centered, tap targets meet the native minimum, and lower cards retain Flank's existing spacing. At narrow widths the six-item selector scrolls horizontally instead of compressing labels.
 - Colors and visual tokens: sampled logo colors are restrained before entering the hero, white hero content remains high contrast, live keeps a semantic red treatment, and light/dark system surfaces remain adaptive. The final orange selector/action accents align with Flank's visual language.
+- Winner outcome: the completed-state winner uses a semantic green score tile and compact text badge. It is independent of team branding, so a red team still reads as a green win; the losing side keeps the neutral score treatment.
 - Image quality and asset fidelity: the UI uses real V3 team and event logo URLs. Missing image URLs keep a native shield fallback and safe team-color defaults; no custom logo artwork was introduced. Summary payloads with nil logo URLs successfully hydrate from detail payloads in the observed production matches.
 - Copy and content: all visible team, event, stage, series, score, status, map, format, and date content comes from V3 data or existing Flank labels. Team tags and regions are shown only when supplied; observed payloads omitted them, so none were invented.
 - Interactions and accessibility: team links, Overview/Maps/Stats/Rounds/Economy/History switching, calendar action, streams, pull-to-refresh, and data-dependent section visibility remain intact. Reduce Motion sets the fluid background speed to zero and disables the selector animation.
@@ -49,6 +51,12 @@ No actionable P0, P1, or P2 differences remain.
 - Completed dark final: `/Users/chefski/.codex/visualizations/2026/08/29/01a04db3-4dea-7241-bb6c-1ab5bb2ac075/match-detail-completed-dark-final-raw.png`.
 - AX XXL: `/Users/chefski/.codex/visualizations/2026/08/29/01a04db3-4dea-7241-bb6c-1ab5bb2ac075/match-detail-scheduled-dark-axxxl.jpg` and `match-detail-scheduled-dark-axxxl-scrolled.jpg`.
 - Missing/placeholder team data: `/Users/chefski/.codex/visualizations/2026/08/29/01a04db3-4dea-7241-bb6c-1ab5bb2ac075/match-detail-missing-team-dark.jpg`.
+
+### Pass 3 — passed
+
+- The inline checkmark beside the team name was removed because it competed with the team identity instead of clarifying the match outcome.
+- The first replacement inherited the winning team's red branding, which made the result read incorrectly.
+- The final completed state uses semantic green for both the winning score tile and `WINNER` capsule, verified in `match-detail-completed-winner-green.jpg`.
 
 ## Remaining validation caveat
 

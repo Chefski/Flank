@@ -977,18 +977,11 @@ private struct MatchHeroView: View {
             .frame(width: 72, height: 72)
             .accessibilityHidden(true)
 
-            HStack(spacing: 5) {
-                Text(team?.name ?? "Team unavailable")
-                    .font(.headline.weight(.bold))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-                if team?.isWinner == true {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(.white)
-                        .accessibilityHidden(true)
-                }
-            }
+            Text(team?.name ?? "Team unavailable")
+                .font(.headline.weight(.bold))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
 
             if let teamLabel = teamLabel(team) {
                 Text(teamLabel)
@@ -1001,6 +994,21 @@ private struct MatchHeroView: View {
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
                             .stroke(.white.opacity(0.2), lineWidth: 0.5)
                     }
+            }
+
+            if showsWinnerOutcome {
+                Text("WINNER")
+                    .font(.caption2.weight(.black))
+                    .tracking(0.9)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(winnerColor, in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .stroke(.white.opacity(0.34), lineWidth: 0.75)
+                    }
+                    .opacity(team?.isWinner == true ? 1 : 0)
+                    .accessibilityHidden(team?.isWinner != true)
             }
         }
         .frame(maxWidth: .infinity)
@@ -1019,11 +1027,17 @@ private struct MatchHeroView: View {
                     .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             } else {
                 HStack(spacing: 8) {
-                    scoreCell(teams.first?.score)
+                    scoreCell(
+                        teams.first?.score,
+                        isWinner: teams.first?.isWinner == true
+                    )
                     Text("–")
                         .font(.title3.weight(.medium))
                         .foregroundStyle(.white.opacity(0.76))
-                    scoreCell(teams.dropFirst().first?.score)
+                    scoreCell(
+                        teams.dropFirst().first?.score,
+                        isWinner: teams.dropFirst().first?.isWinner == true
+                    )
                 }
             }
 
@@ -1038,15 +1052,26 @@ private struct MatchHeroView: View {
         .accessibilityLabel(heroAccessibilityLabel)
     }
 
-    private func scoreCell(_ value: Int?) -> some View {
+    private func scoreCell(_ value: Int?, isWinner: Bool) -> some View {
         Text(value.map(String.init) ?? "–")
             .font(.largeTitle.bold().monospacedDigit())
             .frame(minWidth: 52, minHeight: 58)
-            .background(.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(
+                isWinner ? winnerColor : .black.opacity(0.24),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(.white.opacity(0.14), lineWidth: 1)
+                    .stroke(.white.opacity(isWinner ? 0.38 : 0.14), lineWidth: 1)
             }
+    }
+
+    private var showsWinnerOutcome: Bool {
+        status == .completed && teams.contains(where: \.isWinner)
+    }
+
+    private var winnerColor: Color {
+        Color(red: 0.08, green: 0.48, blue: 0.27)
     }
 
     private func teamLabel(_ team: V3TeamRef?) -> String? {
