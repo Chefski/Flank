@@ -6,7 +6,6 @@
 import EventKit
 import FluidGradient
 import SwiftUI
-import UIImageColors
 
 @MainActor
 final class MatchDetailViewModel: ObservableObject {
@@ -185,7 +184,7 @@ struct MatchDetailView: View {
             }
         }
         .task(id: "\(viewModel.matchID)-\(reloadToken)") {
-            await viewModel.load(forceRefresh: reloadToken > 0)
+            await viewModel.load()
         }
         .onAppear {
             guard !hasTrackedOpen else { return }
@@ -293,7 +292,7 @@ struct MatchDetailView: View {
                 .padding(.bottom, 24)
             }
         }
-        .refreshable { reloadToken += 1 }
+        .refreshable { await viewModel.load(forceRefresh: true) }
         .onChange(of: availableSections(for: detail)) { _, sections in
             if !sections.contains(selectedSection) {
                 selectedSection = .overview
@@ -330,6 +329,7 @@ struct MatchDetailView: View {
         .overlay(alignment: .bottom) {
             Divider()
         }
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Match detail section")
     }
 
@@ -404,7 +404,7 @@ struct MatchDetailView: View {
 
         if !detail.notes.isEmpty {
             MatchDetailCard(title: "Notes", symbol: "note.text") {
-                ForEach(detail.notes, id: \.self) { note in
+                ForEach(Array(detail.notes.enumerated()), id: \.offset) { _, note in
                     Text(note)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -476,7 +476,6 @@ struct MatchDetailView: View {
                             .padding(.vertical, 4)
                         }
                     }
-                    .accessibilityLabel("\(row.player.name) matchup performance")
                 }
             }
         }
@@ -517,7 +516,7 @@ struct MatchDetailView: View {
     private func economy(_ detail: V3MatchDetail) -> some View {
         if !detail.economy.isEmpty {
             MatchDetailCard(title: "Match economy", symbol: "creditcard.fill") {
-                ForEach(detail.economy, id: \.identityKey) { row in
+                ForEach(Array(detail.economy.enumerated()), id: \.offset) { _, row in
                     EconomyRowView(row: row, teams: detail.teams)
                 }
             }
@@ -528,7 +527,7 @@ struct MatchDetailView: View {
                 title: "\(game.mapName ?? "Map \(game.number)") economy",
                 symbol: "banknote"
             ) {
-                ForEach(game.economy, id: \.identityKey) { row in
+                ForEach(Array(game.economy.enumerated()), id: \.offset) { _, row in
                     EconomyRowView(row: row, teams: detail.teams)
                 }
             }
@@ -599,7 +598,7 @@ struct MatchDetailView: View {
     ) -> some View {
         DisclosureGroup {
             VStack(spacing: 0) {
-                ForEach(streams) { stream in
+                ForEach(Array(streams.enumerated()), id: \.offset) { index, stream in
                     externalRow(
                         name: stream.name,
                         detail: stream.countryCode?.uppercased() ?? "",
@@ -608,7 +607,7 @@ struct MatchDetailView: View {
                         source: "stream"
                     )
 
-                    if stream.id != streams.last?.id {
+                    if index < streams.count - 1 {
                         Divider()
                             .padding(.leading, 40)
                     }
@@ -656,7 +655,7 @@ struct MatchDetailView: View {
     private func vodDisclosure(_ vods: [V3Vod]) -> some View {
         DisclosureGroup {
             VStack(spacing: 0) {
-                ForEach(vods) { vod in
+                ForEach(Array(vods.enumerated()), id: \.offset) { index, vod in
                     externalRow(
                         name: vod.name,
                         detail: [vod.platform, vod.mapNumber.map { "Map \($0)" }]
@@ -667,7 +666,7 @@ struct MatchDetailView: View {
                         source: "vod"
                     )
 
-                    if vod.id != vods.last?.id {
+                    if index < vods.count - 1 {
                         Divider()
                             .padding(.leading, 40)
                     }
@@ -722,50 +721,54 @@ struct MatchDetailView: View {
     }
 
     private func addToCalendar(detail: V3MatchDetail, startsAt: Date) {
-        let eventStore = EKEventStore()
+        Task { await saveToCalendar(detail: detail, startsAt: startsAt) }
+    }
 
-        func save() {
-            let event = EKEvent(eventStore: eventStore)
-            let teamNames = detail.teams.map(\.name)
-            event.title = teamNames.count == 2
-                ? "\(teamNames[0]) vs \(teamNames[1])"
-                : detail.event.name
-            event.startDate = startsAt
-            event.endDate = startsAt.addingTimeInterval(2 * 60 * 60)
-            event.calendar = eventStore.defaultCalendarForNewEvents
-            event.url = VLRAPI.pageURL(from: detail.url)
-
-            do {
-                try eventStore.save(event, span: .thisEvent)
-                calendarAlertMessage = "Event added to calendar successfully!"
-            } catch {
-                calendarAlertMessage = "Failed to save event: \(error.localizedDescription)"
-            }
-            showingCalendarAlert = true
-        }
-
+    private func saveToCalendar(detail: V3MatchDetail, startsAt: Date) async {
         switch EKEventStore.authorizationStatus(for: .event) {
         case .fullAccess, .writeOnly:
-            save()
+            break
         case .notDetermined:
-            eventStore.requestWriteOnlyAccessToEvents { granted, error in
-                Task { @MainActor in
-                    if granted {
-                        save()
-                    } else {
-                        calendarAlertMessage = error?.localizedDescription
-                            ?? "Calendar access was denied."
-                        showingCalendarAlert = true
-                    }
+            do {
+                // Asks on a throwaway store; access is per app, so the store below can save.
+                guard try await EKEventStore().requestWriteOnlyAccessToEvents() else {
+                    showCalendarAlert("Calendar access was denied.")
+                    return
                 }
+            } catch {
+                showCalendarAlert(error.localizedDescription)
+                return
             }
         case .restricted, .denied:
-            calendarAlertMessage = "Calendar access is restricted or denied. Please check Settings."
-            showingCalendarAlert = true
+            showCalendarAlert("Calendar access is restricted or denied. Please check Settings.")
+            return
         @unknown default:
-            calendarAlertMessage = "Calendar access is unavailable."
-            showingCalendarAlert = true
+            showCalendarAlert("Calendar access is unavailable.")
+            return
         }
+
+        let eventStore = EKEventStore()
+        let event = EKEvent(eventStore: eventStore)
+        let teamNames = detail.teams.map(\.name)
+        event.title = teamNames.count == 2
+            ? "\(teamNames[0]) vs \(teamNames[1])"
+            : detail.event.name
+        event.startDate = startsAt
+        event.endDate = startsAt.addingTimeInterval(2 * 60 * 60)
+        event.calendar = eventStore.defaultCalendarForNewEvents
+        event.url = VLRAPI.pageURL(from: detail.url)
+
+        do {
+            try eventStore.save(event, span: .thisEvent)
+            showCalendarAlert("Event added to calendar successfully!")
+        } catch {
+            showCalendarAlert("Failed to save event: \(error.localizedDescription)")
+        }
+    }
+
+    private func showCalendarAlert(_ message: String) {
+        calendarAlertMessage = message
+        showingCalendarAlert = true
     }
 }
 
@@ -807,8 +810,37 @@ private struct MatchHeroView: View {
     let games: [V3Game]
     let format: String?
 
-    @State private var leadingColor = Color(red: 0.32, green: 0.16, blue: 0.42)
-    @State private var trailingColor = Color(red: 0.55, green: 0.24, blue: 0.08)
+    private static let leadingFallback = Color(red: 0.32, green: 0.16, blue: 0.42)
+    private static let trailingFallback = Color(red: 0.55, green: 0.24, blue: 0.08)
+
+    @State private var leadingColor: Color
+    @State private var trailingColor: Color
+
+    init(
+        status: V3MatchStatus,
+        startsAt: Date?,
+        teams: [V3TeamRef],
+        event: V3EventRef,
+        games: [V3Game],
+        format: String?
+    ) {
+        self.status = status
+        self.startsAt = startsAt
+        self.teams = teams
+        self.event = event
+        self.games = games
+        self.format = format
+        // The loading and loaded states each build a hero; starting from already-sampled
+        // colours keeps the second one from flashing the fallback.
+        _leadingColor = State(initialValue: HeroColorSampler.color(
+            LogoColorSampler.cachedColors(for: teams.first?.image.preferred(for: .dark)),
+            fallback: Self.leadingFallback
+        ))
+        _trailingColor = State(initialValue: HeroColorSampler.color(
+            LogoColorSampler.cachedColors(for: teams.dropFirst().first?.image.preferred(for: .dark)),
+            fallback: Self.trailingFallback
+        ))
+    }
 
     private var firstTeamLogo: String? {
         teams.first?.image.preferred(for: .dark)
@@ -901,16 +933,15 @@ private struct MatchHeroView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Match summary")
         .task(id: "\(firstTeamLogo ?? "")|\(secondTeamLogo ?? "")") {
-            async let first = HeroColorSampler.sampledColor(
-                from: firstTeamLogo,
-                fallback: Color(red: 0.32, green: 0.16, blue: 0.42)
-            )
-            async let second = HeroColorSampler.sampledColor(
-                from: secondTeamLogo,
-                fallback: Color(red: 0.55, green: 0.24, blue: 0.08)
-            )
-            let colors = await (first, second)
+            async let first = LogoColorSampler.colors(for: firstTeamLogo)
+            async let second = LogoColorSampler.colors(for: secondTeamLogo)
+            let sampled = await (first, second)
             guard !Task.isCancelled else { return }
+            let colors = (
+                HeroColorSampler.color(sampled.0, fallback: Self.leadingFallback),
+                HeroColorSampler.color(sampled.1, fallback: Self.trailingFallback)
+            )
+            guard colors.0 != leadingColor || colors.1 != trailingColor else { return }
 
             if reduceMotion {
                 leadingColor = colors.0
@@ -1128,53 +1159,36 @@ private struct MatchHeroView: View {
 }
 
 private enum HeroColorSampler {
-    @MainActor
-    static func sampledColor(from logo: String?, fallback: Color) async -> Color {
-        guard let url = VLRAPI.imageURL(from: logo) else { return fallback }
+    /// The first reasonably saturated logo colour, clamped so white hero text stays readable.
+    static func color(_ colors: LogoColors?, fallback: Color) -> Color {
+        let candidates = [colors?.background, colors?.primary, colors?.secondary, colors?.detail]
+            .compactMap { $0 }
 
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            try Task.checkCancellation()
-            guard let response = response as? HTTPURLResponse,
-                  (200...299).contains(response.statusCode),
-                  let image = UIImage(data: data) else {
-                return fallback
+        for candidate in candidates {
+            var hue: CGFloat = 0
+            var saturation: CGFloat = 0
+            var brightness: CGFloat = 0
+            var alpha: CGFloat = 0
+            guard candidate.getHue(
+                &hue,
+                saturation: &saturation,
+                brightness: &brightness,
+                alpha: &alpha
+            ), saturation >= 0.12 else {
+                continue
             }
 
-            let colors: UIImageColors? = await withCheckedContinuation { continuation in
-                image.getColors { continuation.resume(returning: $0) }
-            }
-            let candidates = [colors?.background, colors?.primary, colors?.secondary, colors?.detail]
-                .compactMap { $0 }
-
-            for candidate in candidates {
-                var hue: CGFloat = 0
-                var saturation: CGFloat = 0
-                var brightness: CGFloat = 0
-                var alpha: CGFloat = 0
-                guard candidate.getHue(
-                    &hue,
-                    saturation: &saturation,
-                    brightness: &brightness,
-                    alpha: &alpha
-                ), saturation >= 0.12 else {
-                    continue
-                }
-
-                return Color(
-                    uiColor: UIColor(
-                        hue: hue,
-                        saturation: min(max(saturation, 0.38), 0.72),
-                        brightness: min(max(brightness, 0.34), 0.62),
-                        alpha: 1
-                    )
+            return Color(
+                uiColor: UIColor(
+                    hue: hue,
+                    saturation: min(max(saturation, 0.38), 0.72),
+                    brightness: min(max(brightness, 0.34), 0.62),
+                    alpha: 1
                 )
-            }
-
-            return fallback
-        } catch {
-            return fallback
+            )
         }
+
+        return fallback
     }
 }
 
@@ -1410,8 +1424,8 @@ private struct AdvancedPerformanceRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .accessibilityElement(children: .combine)
         }
-        .accessibilityLabel("Performance for \(player.player.name)")
     }
 
     private var multiKills: String {
@@ -1460,7 +1474,7 @@ private struct RoundRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(winnerName)
                     .font(.subheadline.weight(.semibold))
-                Text([round.side.rawValue.capitalized, round.method].compactMap { $0 }.joined(separator: " · "))
+                Text([round.side.displayName, round.method].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1471,8 +1485,14 @@ private struct RoundRow: View {
         .frame(minHeight: 44)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "Round \(round.number), \(winnerName) won on \(round.side.rawValue), \(round.method ?? "method unavailable"), score \(round.scoreAfter.team1.map(String.init) ?? "unavailable") to \(round.scoreAfter.team2.map(String.init) ?? "unavailable")"
+            "Round \(round.number), \(outcomeDescription), \(round.method ?? "method unavailable"), score \(round.scoreAfter.team1.map(String.init) ?? "unavailable") to \(round.scoreAfter.team2.map(String.init) ?? "unavailable")"
         )
+    }
+
+    private var outcomeDescription: String {
+        guard round.winner != .unknown else { return "winner unavailable" }
+        guard let side = round.side.displayName else { return "\(winnerName) won" }
+        return "\(winnerName) won on \(side.lowercased())"
     }
 
     private var winnerName: String {
@@ -1575,6 +1595,17 @@ private extension V3GameStatus {
         case .inProgress: "In progress"
         case .completed: "Completed"
         case .unknown: "Status unavailable"
+        }
+    }
+}
+
+private extension V3Side {
+    /// Side label for display; `nil` when the API sent a side the app doesn't know.
+    var displayName: String? {
+        switch self {
+        case .attack: "Attack"
+        case .defense: "Defense"
+        case .unknown: nil
         }
     }
 }

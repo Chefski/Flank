@@ -6,6 +6,57 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Lenient decoding
+
+/// String-backed enums that decode unrecognised values as `unknownCase`
+/// instead of failing the whole payload when the API adds a new value.
+protocol UnknownCaseDecodable: RawRepresentable, Decodable where RawValue == String {
+    static var unknownCase: Self { get }
+}
+
+extension UnknownCaseDecodable {
+    init(from decoder: Decoder) throws {
+        let rawValue = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: rawValue) ?? Self.unknownCase
+    }
+}
+
+/// Values that have a natural "nothing here" form, used when a key is missing or null.
+protocol EmptyDefaultable {
+    static var emptyValue: Self { get }
+}
+
+extension Array: EmptyDefaultable {
+    static var emptyValue: Self { [] }
+}
+
+/// Decodes a missing or `null` key as `Value.emptyValue`, so one absent section
+/// doesn't make the whole match unreadable.
+@propertyWrapper
+struct DefaultEmpty<Value: Codable & Hashable & Sendable & EmptyDefaultable>: Codable, Hashable, Sendable {
+    var wrappedValue: Value
+
+    init(wrappedValue: Value) {
+        self.wrappedValue = wrappedValue
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        wrappedValue = container.decodeNil() ? .emptyValue : try container.decode(Value.self)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wrappedValue)
+    }
+}
+
+extension KeyedDecodingContainer {
+    func decode<Value>(_ type: DefaultEmpty<Value>.Type, forKey key: Key) throws -> DefaultEmpty<Value> {
+        try decodeIfPresent(type, forKey: key) ?? DefaultEmpty(wrappedValue: .emptyValue)
+    }
+}
+
 struct VLRAPIConfiguration: Sendable {
     var host: String
     var v2Path: String
@@ -18,6 +69,17 @@ struct VLRAPIConfiguration: Sendable {
         v3Path: "v3",
         timeout: 20
     )
+
+    /// The API the app talks to. Debug builds can point at a local server with the
+    /// `FLANKAPIHost` user default, e.g. launch argument `-FLANKAPIHost http://127.0.0.1:8000`.
+    static var current: VLRAPIConfiguration {
+        #if DEBUG
+        if let host = UserDefaults.standard.string(forKey: "FLANKAPIHost"), !host.isEmpty {
+            return VLRAPIConfiguration(host: host)
+        }
+        #endif
+        return .production
+    }
 
     init(
         host: String,
@@ -77,10 +139,23 @@ enum VLRAPIError: LocalizedError, Equatable, Sendable {
             return "The VLR API URL could not be created."
         case .invalidResponse:
             return "The VLR API returned an invalid response."
+        case .httpStatus(429):
+            return "Too many requests. Wait a minute, then try again."
+        case .httpStatus(let statusCode) where (500...599).contains(statusCode):
+            return "The data service is having trouble right now (error \(statusCode)). Try again shortly."
         case .httpStatus(let statusCode):
             return "The VLR API returned HTTP status \(statusCode)."
         case .transport(let code):
-            return URLError(code).localizedDescription
+            switch code {
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
+                return "You’re offline. Check your connection and try again."
+            case .timedOut:
+                return "The request timed out. Try again in a moment."
+            case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                return "Couldn’t reach the Flank data service. Try again in a moment."
+            default:
+                return "A network error occurred. Try again."
+            }
         case .requestFailed(let message):
             return message ?? "The VLR API request failed."
         }
@@ -112,11 +187,12 @@ struct V3EntityMeta: Codable, Hashable, Sendable {
 
 struct V3MatchListMeta: Codable, Hashable, Sendable {
     let source: String?
-    let query: V3MatchQuery
+    // Kept as a string: the app never reads it, and a new query name must not break list decoding.
+    let query: String?
     let pageRange: String?
     let totalPagesRequested: Int?
     let successfulPages: Int?
-    let failedPages: [Int]
+    @DefaultEmpty var failedPages: [Int]
     let eventID: Int?
 
     enum CodingKeys: String, CodingKey {
@@ -137,11 +213,13 @@ enum V3MatchQuery: String, Codable, CaseIterable, Sendable {
     case event
 }
 
-enum V3MatchStatus: String, Codable, Sendable {
+enum V3MatchStatus: String, Codable, Sendable, UnknownCaseDecodable {
     case scheduled
     case live
     case completed
     case unknown
+
+    static let unknownCase = V3MatchStatus.unknown
 
     var displayName: String {
         switch self {
@@ -153,7 +231,7 @@ enum V3MatchStatus: String, Codable, Sendable {
     }
 }
 
-enum V3MatchSource: String, Codable, Sendable {
+enum V3MatchSource: String, Codable, Sendable, UnknownCaseDecodable {
     case upcoming
     case live
     case matches
@@ -161,15 +239,22 @@ enum V3MatchSource: String, Codable, Sendable {
     case event
     case team
     case player
+    case unknown
+
+    static let unknownCase = V3MatchSource.unknown
 }
 
-struct V3DisplayTime: Codable, Hashable, Sendable {
+struct V3DisplayTime: Codable, Hashable, Sendable, EmptyDefaultable {
     let date: String?
     let time: String?
     let relative: String?
+
+    static let emptyValue = V3DisplayTime(date: nil, time: nil, relative: nil)
 }
 
-struct V3Image: Codable, Hashable, Sendable {
+struct V3Image: Codable, Hashable, Sendable, EmptyDefaultable {
+    static let emptyValue = V3Image(url: nil, lightURL: nil, darkURL: nil)
+
     let url: String?
     let lightURL: String?
     let darkURL: String?
@@ -197,7 +282,7 @@ struct V3EventRef: Codable, Hashable, Sendable {
     let stageSlug: String?
     let series: String?
     let url: String?
-    let image: V3Image
+    @DefaultEmpty var image: V3Image
 
     enum CodingKeys: String, CodingKey {
         case id, name, stage, series, url, image
@@ -230,7 +315,7 @@ struct V3TeamRef: Codable, Hashable, Sendable {
         countryCode = try container.decodeIfPresent(String.self, forKey: .countryCode)
         region = try container.decodeIfPresent(String.self, forKey: .region)
         url = try container.decodeIfPresent(String.self, forKey: .url)
-        image = try container.decode(V3Image.self, forKey: .image)
+        image = try container.decodeIfPresent(V3Image.self, forKey: .image) ?? .emptyValue
         score = try container.decodeIfPresent(Int.self, forKey: .score)
         isWinner = try container.decodeIfPresent(Bool.self, forKey: .isWinner) ?? false
     }
@@ -244,9 +329,9 @@ struct V3Match: Codable, Hashable, Identifiable, Sendable {
     let status: V3MatchStatus
     let statusText: String?
     let startsAt: Date?
-    let display: V3DisplayTime
+    @DefaultEmpty var display: V3DisplayTime
     let event: V3EventRef
-    let teams: [V3TeamRef]
+    @DefaultEmpty var teams: [V3TeamRef]
     let note: String?
     let page: Int?
 
@@ -290,21 +375,27 @@ struct V3Vod: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-struct V3Score: Codable, Hashable, Sendable {
+struct V3Score: Codable, Hashable, Sendable, EmptyDefaultable {
     let team1: Int?
     let team2: Int?
+
+    static let emptyValue = V3Score(team1: nil, team2: nil)
 }
 
-struct V3TeamSideScore: Codable, Hashable, Sendable {
+struct V3TeamSideScore: Codable, Hashable, Sendable, EmptyDefaultable {
     let total: Int?
     let attack: Int?
     let defense: Int?
     let overtime: Int?
+
+    static let emptyValue = V3TeamSideScore(total: nil, attack: nil, defense: nil, overtime: nil)
 }
 
-struct V3MapSideScores: Codable, Hashable, Sendable {
-    let team1: V3TeamSideScore
-    let team2: V3TeamSideScore
+struct V3MapSideScores: Codable, Hashable, Sendable, EmptyDefaultable {
+    @DefaultEmpty var team1: V3TeamSideScore
+    @DefaultEmpty var team2: V3TeamSideScore
+
+    static let emptyValue = V3MapSideScores(team1: .emptyValue, team2: .emptyValue)
 }
 
 struct V3MapPick: Codable, Hashable, Sendable {
@@ -320,7 +411,13 @@ struct V3PlayerRef: Codable, Hashable, Sendable {
     var identityKey: String { id.map(String.init) ?? url ?? name }
 }
 
-struct V3PlayerSideStats: Codable, Hashable, Sendable {
+struct V3PlayerSideStats: Codable, Hashable, Sendable, EmptyDefaultable {
+    static let emptyValue = V3PlayerSideStats(
+        rating: nil, averageCombatScore: nil, kills: nil, deaths: nil, assists: nil,
+        killDeathDifferential: nil, kastPercent: nil, averageDamagePerRound: nil,
+        headshotPercent: nil, firstKills: nil, firstDeaths: nil, firstKillDifferential: nil
+    )
+
     let rating: Double?
     let averageCombatScore: Double?
     let kills: Int?
@@ -365,8 +462,8 @@ struct V3MapPlayerStats: Codable, Hashable, Sendable {
     let teamTag: String?
     let agent: String?
     let agentSlug: String?
-    let attack: V3PlayerSideStats
-    let defense: V3PlayerSideStats
+    @DefaultEmpty var attack: V3PlayerSideStats
+    @DefaultEmpty var defense: V3PlayerSideStats
 
     enum CodingKeys: String, CodingKey {
         case rating, kills, deaths, assists, player, agent, attack, defense
@@ -384,28 +481,36 @@ struct V3MapPlayerStats: Codable, Hashable, Sendable {
     }
 }
 
-struct V3GamePlayers: Codable, Hashable, Sendable {
-    let team1: [V3MapPlayerStats]
-    let team2: [V3MapPlayerStats]
+struct V3GamePlayers: Codable, Hashable, Sendable, EmptyDefaultable {
+    @DefaultEmpty var team1: [V3MapPlayerStats]
+    @DefaultEmpty var team2: [V3MapPlayerStats]
+
+    static let emptyValue = V3GamePlayers(team1: [], team2: [])
 }
 
-enum V3GameStatus: String, Codable, Sendable {
+enum V3GameStatus: String, Codable, Sendable, UnknownCaseDecodable {
     case scheduled
     case inProgress = "in_progress"
     case completed
     case unknown
+
+    static let unknownCase = V3GameStatus.unknown
 }
 
-enum V3RoundWinner: String, Codable, Sendable {
+enum V3RoundWinner: String, Codable, Sendable, UnknownCaseDecodable {
     case team1
     case team2
     case unknown
+
+    static let unknownCase = V3RoundWinner.unknown
 }
 
-enum V3Side: String, Codable, Sendable {
+enum V3Side: String, Codable, Sendable, UnknownCaseDecodable {
     case attack
     case defense
     case unknown
+
+    static let unknownCase = V3Side.unknown
 }
 
 struct V3Round: Codable, Hashable, Identifiable, Sendable {
@@ -416,7 +521,7 @@ struct V3Round: Codable, Hashable, Identifiable, Sendable {
     let method: String?
     let methodCode: String?
     let methodIconURL: String?
-    let scoreAfter: V3Score
+    @DefaultEmpty var scoreAfter: V3Score
 
     enum CodingKeys: String, CodingKey {
         case number, winner, side, method
@@ -436,7 +541,7 @@ struct V3Matchup: Codable, Hashable, Sendable {
 struct V3KillMatrixRow: Codable, Hashable, Sendable {
     let player: V3PlayerRef
     let teamTag: String?
-    let matchups: [V3Matchup]
+    @DefaultEmpty var matchups: [V3Matchup]
 
     enum CodingKeys: String, CodingKey {
         case player, matchups
@@ -444,14 +549,20 @@ struct V3KillMatrixRow: Codable, Hashable, Sendable {
     }
 }
 
-struct V3MultiKills: Codable, Hashable, Sendable {
+struct V3MultiKills: Codable, Hashable, Sendable, EmptyDefaultable {
     let two: Int?
     let three: Int?
     let four: Int?
     let five: Int?
+
+    static let emptyValue = V3MultiKills(two: nil, three: nil, four: nil, five: nil)
 }
 
-struct V3Clutches: Codable, Hashable, Sendable {
+struct V3Clutches: Codable, Hashable, Sendable, EmptyDefaultable {
+    static let emptyValue = V3Clutches(
+        oneVsOne: nil, oneVsTwo: nil, oneVsThree: nil, oneVsFour: nil, oneVsFive: nil
+    )
+
     let oneVsOne: Int?
     let oneVsTwo: Int?
     let oneVsThree: Int?
@@ -472,8 +583,8 @@ struct V3AdvancedPlayerStats: Codable, Hashable, Sendable {
     let teamTag: String?
     let agent: String?
     let agentSlug: String?
-    let multiKills: V3MultiKills
-    let clutches: V3Clutches
+    @DefaultEmpty var multiKills: V3MultiKills
+    @DefaultEmpty var clutches: V3Clutches
     let economyRating: Int?
     let plants: Int?
     let defuses: Int?
@@ -488,9 +599,11 @@ struct V3AdvancedPlayerStats: Codable, Hashable, Sendable {
     }
 }
 
-struct V3Performance: Codable, Hashable, Sendable {
-    let killMatrix: [V3KillMatrixRow]
-    let advancedStats: [V3AdvancedPlayerStats]
+struct V3Performance: Codable, Hashable, Sendable, EmptyDefaultable {
+    @DefaultEmpty var killMatrix: [V3KillMatrixRow]
+    @DefaultEmpty var advancedStats: [V3AdvancedPlayerStats]
+
+    static let emptyValue = V3Performance(killMatrix: [], advancedStats: [])
 
     enum CodingKeys: String, CodingKey {
         case killMatrix = "kill_matrix"
@@ -500,9 +613,11 @@ struct V3Performance: Codable, Hashable, Sendable {
     var isEmpty: Bool { killMatrix.isEmpty && advancedStats.isEmpty }
 }
 
-struct V3EconomyBucket: Codable, Hashable, Sendable {
+struct V3EconomyBucket: Codable, Hashable, Sendable, EmptyDefaultable {
     let rounds: Int?
     let wins: Int?
+
+    static let emptyValue = V3EconomyBucket(rounds: nil, wins: nil)
 }
 
 struct V3EconomyRow: Codable, Hashable, Sendable {
@@ -510,10 +625,10 @@ struct V3EconomyRow: Codable, Hashable, Sendable {
     let teamTag: String?
     let pistolWins: Int?
     let pistolWinPercent: Double?
-    let eco: V3EconomyBucket
-    let low: V3EconomyBucket
-    let medium: V3EconomyBucket
-    let full: V3EconomyBucket
+    @DefaultEmpty var eco: V3EconomyBucket
+    @DefaultEmpty var low: V3EconomyBucket
+    @DefaultEmpty var medium: V3EconomyBucket
+    @DefaultEmpty var full: V3EconomyBucket
 
     enum CodingKeys: String, CodingKey {
         case eco, low, medium, full
@@ -533,13 +648,13 @@ struct V3Game: Codable, Hashable, Identifiable, Sendable {
     let status: V3GameStatus
     let duration: String?
     let pick: V3MapPick?
-    let score: V3Score
-    let sideScores: V3MapSideScores
-    let players: V3GamePlayers
-    let rounds: [V3Round]
+    @DefaultEmpty var score: V3Score
+    @DefaultEmpty var sideScores: V3MapSideScores
+    @DefaultEmpty var players: V3GamePlayers
+    @DefaultEmpty var rounds: [V3Round]
     let url: String?
-    let performance: V3Performance
-    let economy: [V3EconomyRow]
+    @DefaultEmpty var performance: V3Performance
+    @DefaultEmpty var economy: [V3EconomyRow]
 
     enum CodingKeys: String, CodingKey {
         case id, number, status, duration, pick, score, players, rounds, url, performance, economy
@@ -550,8 +665,8 @@ struct V3Game: Codable, Hashable, Identifiable, Sendable {
 
 struct V3GamePerformance: Codable, Hashable, Identifiable, Sendable {
     var id: Int { gameID }
-    let killMatrix: [V3KillMatrixRow]
-    let advancedStats: [V3AdvancedPlayerStats]
+    @DefaultEmpty var killMatrix: [V3KillMatrixRow]
+    @DefaultEmpty var advancedStats: [V3AdvancedPlayerStats]
     let gameID: Int
 
     enum CodingKeys: String, CodingKey {
@@ -564,7 +679,7 @@ struct V3GamePerformance: Codable, Hashable, Identifiable, Sendable {
 struct V3GameEconomy: Codable, Hashable, Identifiable, Sendable {
     var id: Int { gameID }
     let gameID: Int
-    let teams: [V3EconomyRow]
+    @DefaultEmpty var teams: [V3EconomyRow]
 
     enum CodingKeys: String, CodingKey {
         case gameID = "game_id"
@@ -578,8 +693,8 @@ struct V3HeadToHead: Codable, Hashable, Identifiable, Sendable {
     let eventName: String?
     let eventSeries: String?
     let dateText: String?
-    let teams: [V3TeamRef]
-    let score: V3Score
+    @DefaultEmpty var teams: [V3TeamRef]
+    @DefaultEmpty var score: V3Score
 
     enum CodingKeys: String, CodingKey {
         case id, url, teams, score
@@ -599,17 +714,17 @@ struct V3MatchDetail: Codable, Hashable, Identifiable, Sendable {
     let patch: String?
     let format: String?
     let mapVetos: String?
-    let notes: [String]
+    @DefaultEmpty var notes: [String]
     let event: V3EventRef
-    let teams: [V3TeamRef]
-    let streams: [V3Stream]
-    let vods: [V3Vod]
-    let games: [V3Game]
-    let headToHead: [V3HeadToHead]
-    let performance: V3Performance
-    let performanceByGame: [V3GamePerformance]
-    let economy: [V3EconomyRow]
-    let economyByGame: [V3GameEconomy]
+    @DefaultEmpty var teams: [V3TeamRef]
+    @DefaultEmpty var streams: [V3Stream]
+    @DefaultEmpty var vods: [V3Vod]
+    @DefaultEmpty var games: [V3Game]
+    @DefaultEmpty var headToHead: [V3HeadToHead]
+    @DefaultEmpty var performance: V3Performance
+    @DefaultEmpty var performanceByGame: [V3GamePerformance]
+    @DefaultEmpty var economy: [V3EconomyRow]
+    @DefaultEmpty var economyByGame: [V3GameEconomy]
 
     enum CodingKeys: String, CodingKey {
         case id, url, status, patch, format, notes, event, teams, streams, vods, games, performance, economy
@@ -626,11 +741,11 @@ struct V3MatchDetail: Codable, Hashable, Identifiable, Sendable {
     var secondTeam: V3TeamRef? { teams.dropFirst().first }
 }
 
-struct VLRAPIClient: @unchecked Sendable {
+struct VLRAPIClient: Sendable {
     let configuration: VLRAPIConfiguration
     let session: URLSession
 
-    init(configuration: VLRAPIConfiguration = .production, session: URLSession = .shared) {
+    init(configuration: VLRAPIConfiguration = .current, session: URLSession = .shared) {
         self.configuration = configuration
         self.session = session
     }
@@ -925,14 +1040,15 @@ enum VLRAPI {
     }
 }
 
+// ISO8601DateFormatter is documented as thread-safe, so sharing these is fine.
 private extension ISO8601DateFormatter {
-    static let internetDateTime: ISO8601DateFormatter = {
+    nonisolated(unsafe) static let internetDateTime: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter
     }()
 
-    static let withFractionalSeconds: ISO8601DateFormatter = {
+    nonisolated(unsafe) static let withFractionalSeconds: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter

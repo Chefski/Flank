@@ -65,6 +65,7 @@ enum AnalyticsEvent {
     case loadFailed(surface: String, category: AnalyticsErrorCategory, retryable: Bool)
     case offlineCachePresented(surface: String, category: AnalyticsErrorCategory?)
     case preferenceChanged(preference: String, value: String)
+    case favoriteTeamChanged(id: String, isFavorite: Bool)
 
     fileprivate var name: String {
         switch self {
@@ -79,6 +80,7 @@ enum AnalyticsEvent {
         case .loadFailed: "load_failed"
         case .offlineCachePresented: "offline_cache_presented"
         case .preferenceChanged: "preference_changed"
+        case .favoriteTeamChanged: "favorite_team_changed"
         }
     }
 
@@ -120,6 +122,8 @@ enum AnalyticsEvent {
             ])
         case .preferenceChanged(let preference, let value):
             ["preference": preference, "value": value]
+        case .favoriteTeamChanged(let id, let isFavorite):
+            ["content_type": AnalyticsContentType.team.rawValue, "content_id": id, "is_favorite": isFavorite]
         }
     }
 

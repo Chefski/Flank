@@ -12,6 +12,14 @@ struct HomeView: View {
     @State private var listRetryToken = 0
     @State private var showingSettings = false
     @State private var lastTrackedSearchContext = ""
+    @AppStorage("matchesFavoritesOnly") private var favoritesOnly = false
+
+    private var favorites: FavoriteTeamsStore { .shared }
+
+    /// The favourites filter only applies while there are favourites to filter by.
+    private var isFilteringFavorites: Bool {
+        favoritesOnly && !favorites.ids.isEmpty
+    }
 
     @StateObject private var pastResults = ShowResults()
     @StateObject private var upcomingMatches = ShowUpcoming()
@@ -48,7 +56,9 @@ struct HomeView: View {
                             matchList(
                                 matches: filteredUpcomingMatches,
                                 state: upcomingMatches.state,
-                                emptyTitle: searchText.isEmpty
+                                emptyTitle: isFilteringFavorites
+                                    ? "No upcoming matches for your teams"
+                                    : searchText.isEmpty
                                     ? "No upcoming matches"
                                     : "No upcoming matches found",
                                 card: { UpcomingMatchTab(match: $0) }
@@ -57,7 +67,9 @@ struct HomeView: View {
                             matchList(
                                 matches: filteredPastResults,
                                 state: pastResults.state,
-                                emptyTitle: searchText.isEmpty
+                                emptyTitle: isFilteringFavorites
+                                    ? "No recent results for your teams"
+                                    : searchText.isEmpty
                                     ? "No completed matches"
                                     : "No match results found",
                                 card: { MatchResultsTab(match: $0) }
@@ -184,6 +196,9 @@ struct HomeView: View {
             tabButton("Upcoming")
             tabButton("Results")
             Spacer()
+            if !favorites.ids.isEmpty {
+                favoritesFilterButton
+            }
         }
         .padding(.horizontal)
         .padding(.top, 4)
@@ -204,10 +219,30 @@ struct HomeView: View {
         .accessibilityAddTraits(selectedTab == title ? .isSelected : [])
     }
 
+    private var favoritesFilterButton: some View {
+        Button {
+            favoritesOnly.toggle()
+            Analytics.track(
+                .filterChanged(surface: "matches", filter: "favorites", value: favoritesOnly ? "on" : "off")
+            )
+        } label: {
+            Label("Favourite Teams", systemImage: favoritesOnly ? "star.fill" : "star")
+                .labelStyle(.iconOnly)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(favoritesOnly ? .yellow : .secondary)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: favoritesOnly)
+        .accessibilityLabel("Show only favourite teams")
+        .accessibilityAddTraits(favoritesOnly ? .isSelected : [])
+    }
+
     @ViewBuilder
     private func matchList<Card: View>(
         matches: [V3Match],
-        state: V3MatchListLoadState,
+        state: ListLoadState,
         emptyTitle: String,
         @ViewBuilder card: @escaping (V3Match) -> Card
     ) -> some View {
@@ -222,23 +257,16 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 50)
             case .failed(let message, let retryable):
-                ContentUnavailableView {
-                    Label("Matches unavailable", systemImage: "wifi.exclamationmark")
-                } description: {
-                    Text(message)
-                } actions: {
-                    if retryable {
-                        Button("Try Again") {
-                            Analytics.track(.retryTapped(surface: "matches_\(selectedTab.lowercased())"))
-                            listRetryToken += 1
-                        }
-                            .buttonStyle(.borderedProminent)
-                    }
+                ListFailureView(title: "Matches unavailable", message: message, retryable: retryable) {
+                    Analytics.track(.retryTapped(surface: "matches_\(selectedTab.lowercased())"))
+                    listRetryToken += 1
                 }
             case .empty, .loaded, .cachedOffline:
                 ContentUnavailableView(
                     emptyTitle,
-                    systemImage: searchText.isEmpty ? "calendar.badge.exclamationmark" : "magnifyingglass"
+                    systemImage: isFilteringFavorites
+                        ? "star"
+                        : searchText.isEmpty ? "calendar.badge.exclamationmark" : "magnifyingglass"
                 )
             }
         } else {
@@ -250,14 +278,8 @@ struct HomeView: View {
     }
 
     private func cachedBanner(_ message: String) -> some View {
-        Label("Offline — showing saved matches", systemImage: "icloud.slash")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        OfflineBanner(text: "Offline — showing saved matches", detail: message)
             .padding(.horizontal)
-            .accessibilityHint(message)
     }
 
     private func compactStatus(
@@ -280,12 +302,56 @@ struct HomeView: View {
     }
 
     private func filtered(_ matches: [V3Match]) -> [V3Match] {
+        var matches = matches
+        if isFilteringFavorites {
+            let ids = favorites.ids
+            matches = matches.filter { match in
+                match.teams.contains { $0.id.map(ids.contains) == true }
+            }
+        }
         guard !searchText.isEmpty else { return matches }
         return matches.filter { match in
             match.teams.contains { $0.name.localizedCaseInsensitiveContains(searchText) }
                 || match.event.name.localizedCaseInsensitiveContains(searchText)
                 || match.event.stage?.localizedCaseInsensitiveContains(searchText) == true
                 || match.event.series?.localizedCaseInsensitiveContains(searchText) == true
+        }
+    }
+}
+
+/// "Showing saved data" notice for list screens that fell back to their offline cache.
+struct OfflineBanner: View {
+    let text: String
+    let detail: String
+
+    var body: some View {
+        Label(text, systemImage: "icloud.slash")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .accessibilityHint(detail)
+    }
+}
+
+/// Error state for list screens with nothing cached to show.
+struct ListFailureView: View {
+    let title: String
+    let message: String
+    let retryable: Bool
+    let retry: () -> Void
+
+    var body: some View {
+        ContentUnavailableView {
+            Label(title, systemImage: "wifi.exclamationmark")
+        } description: {
+            Text(message)
+        } actions: {
+            if retryable {
+                Button("Try Again", action: retry)
+                    .buttonStyle(.borderedProminent)
+            }
         }
     }
 }

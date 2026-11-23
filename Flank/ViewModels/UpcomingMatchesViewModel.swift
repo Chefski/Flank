@@ -5,34 +5,50 @@
 
 import Foundation
 
-enum V3MatchListLoadState: Equatable {
+/// Shared load state for list screens (matches, news, rankings, stats).
+enum ListLoadState: Equatable {
     case idle
     case loading
     case loaded
     case empty
     case cachedOffline(String)
     case failed(message: String, retryable: Bool)
+
+    /// The state after a failed load. Content already on screen stays visible and is
+    /// marked as offline; otherwise the screen shows an error with an optional retry.
+    @MainActor
+    static func afterFailure(_ error: Error, hasContent: Bool, surface: String) -> ListLoadState {
+        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        let category = AnalyticsErrorCategory(error)
+        if hasContent {
+            Analytics.track(.offlineCachePresented(surface: surface, category: category))
+            return .cachedOffline(message)
+        }
+        let retryable = (error as? VLRAPIError)?.isRetryable ?? true
+        Analytics.track(.loadFailed(surface: surface, category: category, retryable: retryable))
+        return .failed(message: message, retryable: retryable)
+    }
 }
 
 @MainActor
 class V3MatchListStore: ObservableObject {
     @Published private(set) var matches: [V3Match] = []
-    @Published private(set) var state: V3MatchListLoadState = .idle
+    @Published private(set) var state: ListLoadState = .idle
 
     let query: V3MatchQuery
     private let client: VLRAPIClient
-    private let defaults: UserDefaults
+    private let cache: ListCache
 
     private var cacheKey: String { "v3.matches.\(query.rawValue)" }
 
     init(
         query: V3MatchQuery,
         client: VLRAPIClient = .init(),
-        defaults: UserDefaults = .standard
+        cache: ListCache = .shared
     ) {
         self.query = query
         self.client = client
-        self.defaults = defaults
+        self.cache = cache
         loadCache()
     }
 
@@ -51,50 +67,24 @@ class V3MatchListStore: ObservableObject {
             return
         } catch {
             guard !Task.isCancelled else { return }
-            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            let surface = "matches_\(query.rawValue)"
-            if matches.isEmpty {
-                Analytics.track(
-                    .loadFailed(
-                        surface: surface,
-                        category: AnalyticsErrorCategory(error),
-                        retryable: (error as? VLRAPIError)?.isRetryable ?? true
-                    )
-                )
-                state = .failed(
-                    message: message,
-                    retryable: (error as? VLRAPIError)?.isRetryable ?? true
-                )
-            } else {
-                Analytics.track(
-                    .offlineCachePresented(
-                        surface: surface,
-                        category: AnalyticsErrorCategory(error)
-                    )
-                )
-                state = .cachedOffline(message)
-            }
+            state = .afterFailure(error, hasContent: !matches.isEmpty, surface: "matches_\(query.rawValue)")
         }
     }
 
     private func loadCache() {
-        guard let data = defaults.data(forKey: cacheKey),
-              let cached = try? VLRAPI.decoder.decode([V3Match].self, from: data) else {
-            return
-        }
+        guard let cached = cache.load([V3Match].self, forKey: cacheKey) else { return }
         matches = cached
         state = cached.isEmpty ? .empty : .loaded
     }
 
     private func saveCache() {
-        guard let encoded = try? VLRAPI.encoder.encode(matches) else { return }
-        defaults.set(encoded, forKey: cacheKey)
+        cache.save(matches, forKey: cacheKey)
     }
 }
 
 @MainActor
 final class ShowUpcoming: V3MatchListStore {
-    init(client: VLRAPIClient = .init(), defaults: UserDefaults = .standard) {
-        super.init(query: .upcoming, client: client, defaults: defaults)
+    init(client: VLRAPIClient = .init(), cache: ListCache = .shared) {
+        super.init(query: .upcoming, client: client, cache: cache)
     }
 }

@@ -51,7 +51,7 @@ struct AboutView: View {
                         .frame(width: 70, height: 70)
                 }
             }
-            .sheet(isPresented: $vlrggSite) {
+            .safariView(isPresented: $vlrggSite) {
                 SafariView(
                     url: URL(string: "https://www.vlr.gg/")!,
                     configuration: SafariView.Configuration(
@@ -62,7 +62,6 @@ struct AboutView: View {
                 .preferredBarAccentColor(.clear)
                 .preferredControlAccentColor(.accentColor)
                 .dismissButtonStyle(.done)
-                .ignoresSafeArea()
             }
             .padding()
             .navigationTitle("About")

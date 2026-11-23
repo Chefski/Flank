@@ -6,17 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/stleamist/BetterSafariView.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "884533749e55949b2566030948c6fdbe2873ed0c"
-      }
-    },
-    {
-      "identity" : "colorkit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Boris-Em/ColorKit.git",
-      "state" : {
-        "branch" : "master",
-        "revision" : "6e4375a6126eac0a29893c607ae318bdbe33310c"
+        "revision" : "884533749e55949b2566030948c6fdbe2873ed0c",
+        "version" : "2.4.2"
       }
     },
     {
@@ -38,30 +29,12 @@
       }
     },
     {
-      "identity" : "marqueetext",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/joekndy/MarqueeText",
-      "state" : {
-        "branch" : "master",
-        "revision" : "e18d514455563ad00581e0d825146c6f15b1c6c4"
-      }
-    },
-    {
       "identity" : "posthog-ios",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/PostHog/posthog-ios.git",
       "state" : {
         "revision" : "4cf77c21b424ca16ec827da2fb3f0c61ee90d2aa",
         "version" : "3.69.12"
-      }
-    },
-    {
-      "identity" : "smoothgradient",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/raymondjavaxx/SmoothGradient.git",
-      "state" : {
-        "revision" : "61bf248fad31c7921c9985b418e6e9297cd7b861",
-        "version" : "1.0.0"
       }
     },
     {

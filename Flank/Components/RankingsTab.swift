@@ -6,11 +6,12 @@
 //
 
 import SwiftUI
-import UIImageColors
 
 struct RankingsTab: View {
     @Environment(\.colorScheme) private var colorScheme
-    @State private var primaryTeamColor: Color = Color(red: 0.35, green: 0.35, blue: 0.35)
+    private static let fallbackColor = Color(red: 0.35, green: 0.35, blue: 0.35)
+
+    @State private var primaryTeamColor: Color
     @State private var isSheetPresented = false
     @Namespace private var sheetTransitionNamespace
     
@@ -22,6 +23,14 @@ struct RankingsTab: View {
     init(team: Rankings, searchText: String) {
         self.team = team
         self.searchText = searchText
+        // Start from an already-sampled colour so scrolling back doesn't flash the fallback.
+        // The dark logo is a guess here; the task below corrects it for the real scheme.
+        let cached = LogoColorSampler.cachedColors(
+            for: VLRAPI.preferredLogo(fallback: team.logo, light: team.logo_light, dark: team.logo_dark, for: .dark)
+        ) ?? LogoColorSampler.cachedColors(
+            for: VLRAPI.preferredLogo(fallback: team.logo, light: team.logo_light, dark: team.logo_dark, for: .light)
+        )
+        _primaryTeamColor = State(initialValue: Self.tint(from: cached) ?? Self.fallbackColor)
     }
 
     private var logo: String? {
@@ -57,7 +66,10 @@ struct RankingsTab: View {
                 }
             )
             .task(id: logo) {
-                fetchColors()
+                if let color = Self.tint(from: await LogoColorSampler.colors(for: logo)),
+                   !Task.isCancelled {
+                    primaryTeamColor = color
+                }
             }
             Text(team.team)
                 .font(.system(size: 17, weight: .semibold))
@@ -147,25 +159,10 @@ struct RankingsTab: View {
         })
     }
     
-    private func fetchColors() {
-        if let url = VLRAPI.imageURL(from: logo) {
-            URLSession.shared.dataTask(with: url) { data, _, _ in
-                if let data = data, let uiImage = UIImage(data: data) {
-                    uiImage.getColors { colors in
-                        if let backgroundColor = colors?.background {
-                            let isCloseToBlack = backgroundColor.isCloseToBlack()
-                            
-                            // Set the primary team color accordingly
-                            if isCloseToBlack {
-                                primaryTeamColor = .gray
-                            } else {
-                                primaryTeamColor = Color(backgroundColor)
-                            }
-                        }
-                    }
-                }
-            }.resume()
-        }
+    /// Card tint for a logo's colours; near-black logos get grey so the tint stays visible.
+    private static func tint(from colors: LogoColors?) -> Color? {
+        guard let background = colors?.background else { return nil }
+        return background.isCloseToBlack() ? .gray : Color(background)
     }
 }
 

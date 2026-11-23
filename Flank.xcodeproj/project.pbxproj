@@ -9,6 +9,11 @@
 /* Begin PBXBuildFile section */
 		A15086802F26082600000001 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = A15086802F26082600000003 /* PostHog */; };
 		A15086802F26082600000004 /* Analytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15086802F26082600000005 /* Analytics.swift */; };
+		A15086802F26082600000103 /* ListCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15086802F26082600000104 /* ListCache.swift */; };
+		A15086802F26082600000101 /* LogoColorSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15086802F26082600000102 /* LogoColorSampler.swift */; };
+		A15086802F26082600000201 /* FavoriteTeams.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15086802F26082600000202 /* FavoriteTeams.swift */; };
+		A15086802F26082600000203 /* FavoriteTeamsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15086802F26082600000204 /* FavoriteTeamsViews.swift */; };
+		A15086802F26082600000205 /* FavoriteTeamsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15086802F26082600000206 /* FavoriteTeamsTests.swift */; };
 		470C1DFE2C69A2DD00ED8D29 /* LookingGlassUI in Frameworks */ = {isa = PBXBuildFile; productRef = 470C1DFD2C69A2DD00ED8D29 /* LookingGlassUI */; };
 		471D787D2BDBD5520049641E /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 471D787C2BDBD5520049641E /* AboutView.swift */; };
 		473464342BD7E370003827BB /* RankingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473464332BD7E370003827BB /* RankingsViewModel.swift */; };
@@ -23,8 +28,6 @@
 		4774E5092BD6A1BD009D9E4C /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4774E5082BD6A1BD009D9E4C /* Preview Assets.xcassets */; };
 		4774E5112BD6A1D5009D9E4C /* FluidGradient in Frameworks */ = {isa = PBXBuildFile; productRef = 4774E5102BD6A1D5009D9E4C /* FluidGradient */; };
 		4774E5142BD6A1DC009D9E4C /* BetterSafariView in Frameworks */ = {isa = PBXBuildFile; productRef = 4774E5132BD6A1DC009D9E4C /* BetterSafariView */; };
-		4774E5172BD6A1E4009D9E4C /* MarqueeText in Frameworks */ = {isa = PBXBuildFile; productRef = 4774E5162BD6A1E4009D9E4C /* MarqueeText */; };
-		4774E51D2BD6A1FD009D9E4C /* SmoothGradient in Frameworks */ = {isa = PBXBuildFile; productRef = 4774E51C2BD6A1FD009D9E4C /* SmoothGradient */; };
 		4774E5242BD6A29C009D9E4C /* LiveMatchesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4774E5232BD6A29C009D9E4C /* LiveMatchesViewModel.swift */; };
 		4774E5262BD6A2B3009D9E4C /* NewsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4774E5252BD6A2B3009D9E4C /* NewsViewModel.swift */; };
 		4774E5282BD6A2C0009D9E4C /* MatchResultsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4774E5272BD6A2C0009D9E4C /* MatchResultsViewModel.swift */; };
@@ -40,7 +43,6 @@
 		47C02EEF2C298D0D00A093B3 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 47C02EEE2C298D0D00A093B3 /* Localizable.xcstrings */; };
 		47D203632C596082008C33BA /* FlagEmojis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D203622C596082008C33BA /* FlagEmojis.swift */; };
 		47EBE1A82BDAE89700EA2081 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 47EBE1A72BDAE89700EA2081 /* PrivacyInfo.xcprivacy */; };
-		47E1282E2BDFE6B3008A1825 /* ColorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 47E1282D2BDFE6B3008A1825 /* ColorKit */; };
 		A10203042F12345678900001 /* VLRAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10203042F12345678900002 /* VLRAPI.swift */; };
 		A10203042F12345678900003 /* MatchDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10203042F12345678900004 /* MatchDetailView.swift */; };
 		C205A1012F23456789ABC001 /* ProfileViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C205A1022F23456789ABC002 /* ProfileViews.swift */; };
@@ -59,6 +61,11 @@
 
 /* Begin PBXFileReference section */
 		A15086802F26082600000005 /* Analytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Analytics.swift; sourceTree = "<group>"; };
+		A15086802F26082600000104 /* ListCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListCache.swift; sourceTree = "<group>"; };
+		A15086802F26082600000102 /* LogoColorSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogoColorSampler.swift; sourceTree = "<group>"; };
+		A15086802F26082600000202 /* FavoriteTeams.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoriteTeams.swift; sourceTree = "<group>"; };
+		A15086802F26082600000204 /* FavoriteTeamsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoriteTeamsViews.swift; sourceTree = "<group>"; };
+		A15086802F26082600000206 /* FavoriteTeamsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoriteTeamsTests.swift; sourceTree = "<group>"; };
 		471D787C2BDBD5520049641E /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		473464332BD7E370003827BB /* RankingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RankingsViewModel.swift; sourceTree = "<group>"; };
 		473464352BD7E5E2003827BB /* RankingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RankingsView.swift; sourceTree = "<group>"; };
@@ -102,11 +109,8 @@
 				A15086802F26082600000001 /* PostHog in Frameworks */,
 				479B27402BDE6FFD0005CAEF /* UIImageColors in Frameworks */,
 				470C1DFE2C69A2DD00ED8D29 /* LookingGlassUI in Frameworks */,
-				4774E5172BD6A1E4009D9E4C /* MarqueeText in Frameworks */,
-				4774E51D2BD6A1FD009D9E4C /* SmoothGradient in Frameworks */,
 				4774E5112BD6A1D5009D9E4C /* FluidGradient in Frameworks */,
 				4774E5142BD6A1DC009D9E4C /* BetterSafariView in Frameworks */,
-				47E1282E2BDFE6B3008A1825 /* ColorKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -142,6 +146,9 @@
 			isa = PBXGroup;
 			children = (
 				A15086802F26082600000005 /* Analytics.swift */,
+				A15086802F26082600000202 /* FavoriteTeams.swift */,
+				A15086802F26082600000104 /* ListCache.swift */,
+				A15086802F26082600000102 /* LogoColorSampler.swift */,
 				47F209D12C5EB83D0016B8A5 /* Flank.entitlements */,
 				47AFA8122C59B3FB0004C07A /* Info.plist */,
 				4774E52F2BD6A3AF009D9E4C /* Views */,
@@ -204,6 +211,7 @@
 				473464352BD7E5E2003827BB /* RankingsView.swift */,
 				471D787C2BDBD5520049641E /* AboutView.swift */,
 				47528E5E2D5BD73F006EC29E /* StatsView.swift */,
+				A15086802F26082600000204 /* FavoriteTeamsViews.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -212,6 +220,7 @@
 			isa = PBXGroup;
 			children = (
 				B10203042F12345678900002 /* V3MatchAPITests.swift */,
+				A15086802F26082600000206 /* FavoriteTeamsTests.swift */,
 			);
 			path = FlankTests;
 			sourceTree = "<group>";
@@ -236,10 +245,7 @@
 				A15086802F26082600000003 /* PostHog */,
 				4774E5102BD6A1D5009D9E4C /* FluidGradient */,
 				4774E5132BD6A1DC009D9E4C /* BetterSafariView */,
-				4774E5162BD6A1E4009D9E4C /* MarqueeText */,
-				4774E51C2BD6A1FD009D9E4C /* SmoothGradient */,
 				479B273F2BDE6FFD0005CAEF /* UIImageColors */,
-				47E1282D2BDFE6B3008A1825 /* ColorKit */,
 				470C1DFD2C69A2DD00ED8D29 /* LookingGlassUI */,
 			);
 			productName = Flank;
@@ -290,17 +296,13 @@
 			knownRegions = (
 				en,
 				Base,
-				pl,
 			);
 			mainGroup = 4774E4F52BD6A1BC009D9E4C;
 			packageReferences = (
 				A15086802F26082600000002 /* XCRemoteSwiftPackageReference "posthog-ios" */,
 				4774E50F2BD6A1D5009D9E4C /* XCRemoteSwiftPackageReference "FluidGradient" */,
 				4774E5122BD6A1DC009D9E4C /* XCRemoteSwiftPackageReference "BetterSafariView" */,
-				4774E5152BD6A1E4009D9E4C /* XCRemoteSwiftPackageReference "MarqueeText" */,
-				4774E51B2BD6A1FD009D9E4C /* XCRemoteSwiftPackageReference "SmoothGradient" */,
 				479B273E2BDE6FFD0005CAEF /* XCRemoteSwiftPackageReference "UIImageColors" */,
-				47E1282C2BDFE6B2008A1825 /* XCRemoteSwiftPackageReference "ColorKit" */,
 				470C1DFC2C69A2DD00ED8D29 /* XCRemoteSwiftPackageReference "LookingGlassUI" */,
 			);
 			productRefGroup = 4774E4FF2BD6A1BC009D9E4C /* Products */;
@@ -340,6 +342,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				A15086802F26082600000004 /* Analytics.swift in Sources */,
+				A15086802F26082600000103 /* ListCache.swift in Sources */,
+				A15086802F26082600000101 /* LogoColorSampler.swift in Sources */,
+				A15086802F26082600000201 /* FavoriteTeams.swift in Sources */,
+				A15086802F26082600000203 /* FavoriteTeamsViews.swift in Sources */,
 				A10203042F12345678900001 /* VLRAPI.swift in Sources */,
 				A10203042F12345678900003 /* MatchDetailView.swift in Sources */,
 				C205A1012F23456789ABC001 /* ProfileViews.swift in Sources */,
@@ -372,6 +378,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B10203042F12345678900001 /* V3MatchAPITests.swift in Sources */,
+				A15086802F26082600000205 /* FavoriteTeamsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -531,7 +538,7 @@
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
@@ -570,7 +577,7 @@
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
@@ -585,7 +592,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.chefski.FlankTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Flank.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Flank";
 			};
@@ -601,7 +608,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.chefski.FlankTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Flank.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Flank";
 			};
@@ -676,24 +683,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/stleamist/BetterSafariView.git";
 			requirement = {
-				branch = main;
-				kind = branch;
-			};
-		};
-		4774E5152BD6A1E4009D9E4C /* XCRemoteSwiftPackageReference "MarqueeText" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/joekndy/MarqueeText";
-			requirement = {
-				branch = master;
-				kind = branch;
-			};
-		};
-		4774E51B2BD6A1FD009D9E4C /* XCRemoteSwiftPackageReference "SmoothGradient" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/raymondjavaxx/SmoothGradient.git";
-			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 1.0.0;
+				minimumVersion = 2.4.2;
 			};
 		};
 		479B273E2BDE6FFD0005CAEF /* XCRemoteSwiftPackageReference "UIImageColors" */ = {
@@ -702,14 +693,6 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 2.2.0;
-			};
-		};
-		47E1282C2BDFE6B2008A1825 /* XCRemoteSwiftPackageReference "ColorKit" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Boris-Em/ColorKit.git";
-			requirement = {
-				branch = master;
-				kind = branch;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -735,25 +718,10 @@
 			package = 4774E5122BD6A1DC009D9E4C /* XCRemoteSwiftPackageReference "BetterSafariView" */;
 			productName = BetterSafariView;
 		};
-		4774E5162BD6A1E4009D9E4C /* MarqueeText */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 4774E5152BD6A1E4009D9E4C /* XCRemoteSwiftPackageReference "MarqueeText" */;
-			productName = MarqueeText;
-		};
-		4774E51C2BD6A1FD009D9E4C /* SmoothGradient */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 4774E51B2BD6A1FD009D9E4C /* XCRemoteSwiftPackageReference "SmoothGradient" */;
-			productName = SmoothGradient;
-		};
 		479B273F2BDE6FFD0005CAEF /* UIImageColors */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 479B273E2BDE6FFD0005CAEF /* XCRemoteSwiftPackageReference "UIImageColors" */;
 			productName = UIImageColors;
-		};
-		47E1282D2BDFE6B3008A1825 /* ColorKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 47E1282C2BDFE6B2008A1825 /* XCRemoteSwiftPackageReference "ColorKit" */;
-			productName = ColorKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -23,23 +23,23 @@ struct ContentView: View {
         TabView(selection: tabSelection) {
             HomeView()
                 .tabItem {
-                    Label(NSLocalizedString("nav_matches", comment: ""), systemImage: "gamecontroller.fill")
+                    Label("Matches", systemImage: "gamecontroller.fill")
                 }
                 .tag(Tab.matches)
             RankingsView(scrollToTopTrigger: rankingsScrollToTopTrigger)
                 .tabItem {
-                    Label(NSLocalizedString("nav_rankings", comment: ""), systemImage: "medal.fill")
+                    Label("Rankings", systemImage: "medal.fill")
                 }
                 .tag(Tab.rankings)
             
             NewsView()
                 .tabItem {
-                    Label(NSLocalizedString("nav_news", comment: ""), systemImage: "newspaper.fill")
+                    Label("News", systemImage: "newspaper.fill")
                 }
                 .tag(Tab.news)
             StatsView()
                 .tabItem {
-                    Label(NSLocalizedString("nav_stats", comment: ""), systemImage: "chart.bar.fill")
+                    Label("Stats", systemImage: "chart.bar.fill")
                 }
                 .tag(Tab.stats)
         }
