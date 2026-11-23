@@ -5,14 +5,29 @@
 
 import FluidGradient
 import SwiftUI
-import UIImageColors
 
 struct LiveMatchTab: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let match: V3Match
 
-    @State private var firstTeamColor = Color(red: 0.35, green: 0.35, blue: 0.35)
-    @State private var secondTeamColor = Color(red: 0.08, green: 0.08, blue: 0.1)
+    private static let firstFallback = Color(red: 0.35, green: 0.35, blue: 0.35)
+    private static let secondFallback = Color(red: 0.08, green: 0.08, blue: 0.1)
+
+    @State private var firstTeamColor: Color
+    @State private var secondTeamColor: Color
+
+    init(match: V3Match) {
+        self.match = match
+        // Start from already-sampled colours so a reused card doesn't flash the fallback.
+        _firstTeamColor = State(initialValue: Self.cardColor(
+            LogoColorSampler.cachedColors(for: match.firstTeam?.image.preferred(for: .dark)),
+            fallback: Self.firstFallback
+        ))
+        _secondTeamColor = State(initialValue: Self.cardColor(
+            LogoColorSampler.cachedColors(for: match.secondTeam?.image.preferred(for: .dark)),
+            fallback: Self.secondFallback
+        ))
+    }
 
     private var firstTeamLogo: String? {
         match.firstTeam?.image.preferred(for: .dark)
@@ -98,31 +113,30 @@ struct LiveMatchTab: View {
             }
             .foregroundStyle(.white)
             .background(Color(red: 0.12, green: 0.12, blue: 0.13))
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .clipShape(.rect(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(.white.opacity(0.14), lineWidth: 1)
+                RoundedRectangle(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous)
+                    .strokeBorder(.white.opacity(0.14), lineWidth: 1)
             }
-            .contentShape(.rect)
+            .contentShape(.rect(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous))
+            // The live card is always dark, so logos must resolve their dark variants.
+            .environment(\.colorScheme, .dark)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(MatchCardButtonStyle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint("Opens live native match details")
         .task(id: "\(firstTeamLogo ?? "")|\(secondTeamLogo ?? "")") {
-            async let first = sampledColor(
-                from: firstTeamLogo,
-                fallback: Color(red: 0.35, green: 0.35, blue: 0.35)
-            )
-            async let second = sampledColor(
-                from: secondTeamLogo,
-                fallback: Color(red: 0.08, green: 0.08, blue: 0.1)
-            )
+            async let first = LogoColorSampler.colors(for: firstTeamLogo)
+            async let second = LogoColorSampler.colors(for: secondTeamLogo)
             let colors = await (first, second)
             guard !Task.isCancelled else { return }
+            let firstColor = Self.cardColor(colors.0, fallback: Self.firstFallback)
+            let secondColor = Self.cardColor(colors.1, fallback: Self.secondFallback)
+            guard firstColor != firstTeamColor || secondColor != secondTeamColor else { return }
             withAnimation(.easeInOut(duration: 0.45)) {
-                firstTeamColor = colors.0
-                secondTeamColor = colors.1
+                firstTeamColor = firstColor
+                secondTeamColor = secondColor
             }
         }
     }
@@ -150,25 +164,7 @@ struct LiveMatchTab: View {
         "Live, \(match.firstTeam?.name ?? "team one") versus \(match.secondTeam?.name ?? "team two"), score \(scoreText), \(match.event.name)"
     }
 
-    private func sampledColor(from logo: String?, fallback: Color) async -> Color {
-        guard let url = VLRAPI.imageURL(from: logo) else { return fallback }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            try Task.checkCancellation()
-            guard let response = response as? HTTPURLResponse,
-                  (200...299).contains(response.statusCode),
-                  let image = UIImage(data: data) else {
-                return fallback
-            }
-
-            return await withCheckedContinuation { continuation in
-                image.getColors { colors in
-                    continuation.resume(returning: colors?.background.map(Color.init) ?? fallback)
-                }
-            }
-        } catch {
-            return fallback
-        }
+    private static func cardColor(_ colors: LogoColors?, fallback: Color) -> Color {
+        colors?.background.map(Color.init) ?? fallback
     }
 }

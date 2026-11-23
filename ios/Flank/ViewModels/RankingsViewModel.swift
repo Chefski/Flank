@@ -31,17 +31,25 @@ struct Rankings: Hashable, Codable {
 
 @MainActor
 final class ShowRankings: ObservableObject {
-    @Published var rankings: [Rankings] = []
+    @Published private(set) var rankings: [Rankings] = []
+    @Published private(set) var state: ListLoadState = .idle
 
     private let legacyCacheKey = "cachedRankings"
+    /// Bumped per fetch so a slower, older request (e.g. a pull-to-refresh for the
+    /// previous region) can't overwrite the selection the user switched to.
+    private var latestRequest = 0
+    private let cache: ListCache
+
+    init(cache: ListCache = .shared) {
+        self.cache = cache
+    }
 
     private func cacheKey(for region: String) -> String {
         "cachedRankings.\(region)"
     }
 
     private func loadCachedRankings(for region: String) {
-        if let data = UserDefaults.standard.data(forKey: cacheKey(for: region)),
-           let cachedRankings = try? JSONDecoder().decode([Rankings].self, from: data),
+        if let cachedRankings = cache.load([Rankings].self, forKey: cacheKey(for: region)),
            !cachedRankings.isEmpty {
             rankings = cachedRankings
             return
@@ -49,8 +57,7 @@ final class ShowRankings: ObservableObject {
 
         let defaultRegion = UserDefaults.standard.string(forKey: "defaultRegion") ?? "na"
         if region == defaultRegion,
-           let data = UserDefaults.standard.data(forKey: legacyCacheKey),
-           let cachedRankings = try? JSONDecoder().decode([Rankings].self, from: data),
+           let cachedRankings = cache.load([Rankings].self, forKey: legacyCacheKey),
            !cachedRankings.isEmpty {
             rankings = cachedRankings
             return
@@ -64,13 +71,14 @@ final class ShowRankings: ObservableObject {
             return
         }
 
-        if let encodedData = try? JSONEncoder().encode(rankings) {
-            UserDefaults.standard.set(encodedData, forKey: cacheKey(for: region))
-        }
+        cache.save(rankings, forKey: cacheKey(for: region))
     }
     
     func fetch(for region: String) async {
+        latestRequest += 1
+        let request = latestRequest
         loadCachedRankings(for: region)
+        state = rankings.isEmpty ? .loading : .loaded
 
         do {
             let response = try await VLRAPI.fetch(
@@ -78,45 +86,25 @@ final class ShowRankings: ObservableObject {
                 path: "rankings",
                 queryItems: [URLQueryItem(name: "region", value: region)]
             )
-
-            guard !Task.isCancelled else {
-                return
-            }
+            try Task.checkCancellation()
+            guard request == latestRequest else { return }
 
             guard !response.segments.isEmpty else {
-                Analytics.track(
-                    .loadFailed(
-                        surface: "rankings",
-                        category: .invalidResponse,
-                        retryable: true
-                    )
-                )
+                if rankings.isEmpty {
+                    Analytics.track(.loadFailed(surface: "rankings", category: .invalidResponse, retryable: true))
+                    state = .empty
+                }
                 return
             }
 
             rankings = response.segments
+            state = .loaded
             cacheRankings(for: region)
+        } catch is CancellationError {
+            return
         } catch {
-            guard !Task.isCancelled else {
-                return
-            }
-            if rankings.isEmpty {
-                Analytics.track(
-                    .loadFailed(
-                        surface: "rankings",
-                        category: AnalyticsErrorCategory(error),
-                        retryable: (error as? VLRAPIError)?.isRetryable ?? true
-                    )
-                )
-            } else {
-                Analytics.track(
-                    .offlineCachePresented(
-                        surface: "rankings",
-                        category: AnalyticsErrorCategory(error)
-                    )
-                )
-            }
-            print(error)
+            guard !Task.isCancelled, request == latestRequest else { return }
+            state = .afterFailure(error, hasContent: !rankings.isEmpty, surface: "rankings")
         }
     }
 }

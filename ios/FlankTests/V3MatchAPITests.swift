@@ -207,6 +207,171 @@ final class V3MatchAPITests: XCTestCase {
         XCTAssertEqual(calls, 2)
     }
 
+    func testUnknownEnumValuesDecodeAsUnknown() throws {
+        let json = livePayload
+            .replacingOccurrences(of: "\"status\": \"live\"", with: "\"status\": \"postponed\"")
+            .replacingOccurrences(of: "\"status\": \"in_progress\"", with: "\"status\": \"paused\"")
+        XCTAssertFalse(json.contains("\"in_progress\""), "Fixture no longer contains the game status")
+
+        let detail = try decodeDetail(json).data
+
+        XCTAssertEqual(detail.status, .unknown)
+        XCTAssertEqual(detail.games.first?.status, .unknown)
+    }
+
+    func testMissingSectionsDecodeAsEmpty() throws {
+        let json = """
+        {
+          "api_version": "3",
+          "data": {
+            "id": 1,
+            "url": "https://www.vlr.gg/1/example",
+            "status": "completed",
+            "event": {"name": "Event"},
+            "teams": [{"name": "Alpha"}, {"name": "Beta"}],
+            "games": [{"id": 5, "number": 1, "status": "completed"}]
+          },
+          "meta": {"id": 1}
+        }
+        """
+
+        let detail = try decodeDetail(json).data
+
+        XCTAssertTrue(detail.streams.isEmpty)
+        XCTAssertTrue(detail.headToHead.isEmpty)
+        XCTAssertTrue(detail.performance.isEmpty)
+        XCTAssertNil(detail.teams[0].image.url)
+        XCTAssertNil(detail.event.image.url)
+        let game = try XCTUnwrap(detail.games.first)
+        XCTAssertTrue(game.players.team1.isEmpty)
+        XCTAssertTrue(game.rounds.isEmpty)
+        XCTAssertNil(game.score.team1)
+        XCTAssertNil(game.sideScores.team1.attack)
+    }
+
+    func testMatchListToleratesNewValuesAndSurvivesCacheRoundTrip() throws {
+        let json = """
+        {
+          "api_version": "3",
+          "data": [
+            {
+              "id": 9,
+              "source": "bracket",
+              "url": "https://www.vlr.gg/9/example",
+              "status": "delayed",
+              "event": {"name": "Event", "image": {"url": null}},
+              "teams": [{"name": "Alpha", "image": {}}, {"name": "Beta", "image": null}]
+            }
+          ],
+          "meta": {"query": "something_new"}
+        }
+        """
+
+        let response = try VLRAPI.decoder.decode(
+            V3Response<[V3Match], V3MatchListMeta>.self,
+            from: Data(json.utf8)
+        )
+        let match = try XCTUnwrap(response.data.first)
+        XCTAssertEqual(match.source, .unknown)
+        XCTAssertEqual(match.status, .unknown)
+        XCTAssertNil(match.display.relative)
+        XCTAssertNil(match.secondTeam?.image.url)
+        XCTAssertTrue(response.meta.failedPages.isEmpty)
+
+        // The offline cache encodes and re-decodes matches.
+        let cached = try VLRAPI.decoder.decode(
+            [V3Match].self,
+            from: VLRAPI.encoder.encode(response.data)
+        )
+        XCTAssertEqual(cached, response.data)
+    }
+
+    @MainActor
+    func testFailedLoadKeepsCachedContentVisible() {
+        let error = VLRAPIError.transport(.notConnectedToInternet)
+
+        XCTAssertEqual(
+            ListLoadState.afterFailure(error, hasContent: true, surface: "test"),
+            .cachedOffline(error.errorDescription ?? "")
+        )
+        XCTAssertEqual(
+            ListLoadState.afterFailure(error, hasContent: false, surface: "test"),
+            .failed(message: error.errorDescription ?? "", retryable: true)
+        )
+        XCTAssertEqual(
+            ListLoadState.afterFailure(VLRAPIError.invalidResponse, hasContent: false, surface: "test"),
+            .failed(message: VLRAPIError.invalidResponse.errorDescription ?? "", retryable: false)
+        )
+    }
+
+    @MainActor
+    func testTeamProfileKeepsLoadedContentOnReappearAndFailedRefresh() async throws {
+        let requests = RequestCounter()
+        let failing = RequestCounter()
+        StubURLProtocol.handler = { request in
+            requests.increment()
+            let url = try XCTUnwrap(request.url)
+            let isFailing = failing.value > 0
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: url,
+                statusCode: isFailing ? 503 : 200,
+                httpVersion: nil,
+                headerFields: nil
+            ))
+            let body = url.query?.contains("q=profile") == true
+                ? #"{"status":"success","data":{"segments":[{"id":"42","name":"Alpha"}]}}"#
+                : #"{"status":"success","data":{"segments":[]}}"#
+            return (response, isFailing ? Data() : Data(body.utf8))
+        }
+        defer { StubURLProtocol.handler = nil }
+
+        let viewModel = TeamProfileViewModel(
+            teamID: 42,
+            client: VLRAPIClient(configuration: .init(host: "https://example.test"), session: stubSession())
+        )
+
+        await viewModel.load()
+        XCTAssertEqual(loadedTeamName(viewModel.state), "Alpha")
+        XCTAssertEqual(requests.value, 2)
+
+        // Coming back to the screen must not refetch.
+        await viewModel.load()
+        XCTAssertEqual(requests.value, 2)
+
+        // A failed pull-to-refresh keeps the profile on screen.
+        failing.increment()
+        await viewModel.load(forceRefresh: true)
+        XCTAssertEqual(requests.value, 4)
+        XCTAssertEqual(loadedTeamName(viewModel.state), "Alpha")
+    }
+
+    private func loadedTeamName(_ state: TeamProfileViewModel.State) -> String? {
+        guard case .loaded(let profile, _, _, _) = state else { return nil }
+        return profile?.name
+    }
+
+    func testListCacheMigratesLegacyDefaultsAndRoundTrips() throws {
+        let suiteName = "ListCacheTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        defaults.set(try VLRAPI.encoder.encode(["Alpha", "Beta"]), forKey: "cachedRankings.eu")
+        defaults.set("na", forKey: "defaultRegion")
+
+        let cache = ListCache(directory: directory)
+        cache.migrateLegacyEntries(from: defaults)
+
+        XCTAssertEqual(cache.load([String].self, forKey: "cachedRankings.eu"), ["Alpha", "Beta"])
+        XCTAssertNil(defaults.object(forKey: "cachedRankings.eu"), "Migrated cache should leave UserDefaults")
+        XCTAssertEqual(defaults.string(forKey: "defaultRegion"), "na", "Preferences must not be touched")
+
+        cache.save(["Gamma"], forKey: "v3.news.page.1")
+        XCTAssertEqual(cache.load([String].self, forKey: "v3.news.page.1"), ["Gamma"])
+        XCTAssertNil(cache.load([String].self, forKey: "missing"))
+    }
+
     private func decodeDetail(_ json: String) throws -> V3Response<V3MatchDetail, V3EntityMeta> {
         try VLRAPI.decoder.decode(
             V3Response<V3MatchDetail, V3EntityMeta>.self,
@@ -403,7 +568,8 @@ final class V3MatchAPITests: XCTestCase {
 }
 
 private final class StubURLProtocol: URLProtocol {
-    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    // Tests set this one at a time before making requests.
+    nonisolated(unsafe) static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -454,5 +620,16 @@ private final class LockedClock: @unchecked Sendable {
         lock.lock()
         value = value.addingTimeInterval(interval)
         lock.unlock()
+    }
+}
+
+private final class RequestCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int { lock.withLock { count } }
+
+    func increment() {
+        lock.withLock { count += 1 }
     }
 }

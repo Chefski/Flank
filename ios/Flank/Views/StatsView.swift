@@ -11,7 +11,7 @@ struct StatsView: View {
     @StateObject var statsVM = ShowStats()
     @State private var selectedRegion: String = "All"
     @State private var selectedTimeRange: String = "30 days"
-    @State private var isLoading = false
+    @State private var retryToken = 0
     let regions = ["All", "Americas", "EMEA", "Pacific", "China", "International"]
     let timeRanges = ["30 days", "60 days", "90 days", "all-time"]
     
@@ -96,42 +96,58 @@ struct StatsView: View {
                         }
                         .padding(.horizontal)
                         
-                        ForEach(statsVM.stats, id: \.identityKey) { stat in
-                            PlayerStatTab(stat: stat)
-                                .padding(.horizontal)
-                        }
+                        statsContent
                     }
                 }
-                
-                if isLoading {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(.ultraThinMaterial)
+                .refreshable {
+                    await fetchStats()
                 }
             }
             .navigationBarTitle("Stats")
         }
-        .refreshable {
-            await fetchStats(region: selectedRegion, timeRange: selectedTimeRange)
-        }
-        .task(id: "\(selectedRegion)|\(selectedTimeRange)") {
-            await fetchStats(region: selectedRegion, timeRange: selectedTimeRange)
+        .task(id: "\(selectedRegion)|\(selectedTimeRange)|\(retryToken)") {
+            await fetchStats()
         }
     }
-    
-    private func fetchStats(region: String, timeRange: String) async {
-        isLoading = true
-        let timespan = timeRangeToAPIValue(timeRange)
-        let regionCode = regionToCode(region)
-        await statsVM.fetch(for: regionCode, for: timespan)
 
-        guard !Task.isCancelled,
-              selectedRegion == region,
-              selectedTimeRange == timeRange else {
-            return
+    @ViewBuilder
+    private var statsContent: some View {
+        if statsVM.stats.isEmpty {
+            switch statsVM.state {
+            case .idle, .loading:
+                ProgressView("Loading stats…")
+                    .padding(.top, 50)
+            case .failed(let message, let retryable):
+                ListFailureView(title: "Stats unavailable", message: message, retryable: retryable) {
+                    Analytics.track(.retryTapped(surface: "stats"))
+                    retryToken += 1
+                }
+                .padding(.top, 30)
+            case .empty, .loaded, .cachedOffline:
+                ContentUnavailableView(
+                    "No player stats",
+                    systemImage: "chart.bar",
+                    description: Text("Try another region or time range.")
+                )
+                .padding(.top, 30)
+            }
+        } else {
+            if case .cachedOffline(let message) = statsVM.state {
+                OfflineBanner(text: "Offline — showing saved stats", detail: message)
+                    .padding(.horizontal)
+            }
+            ForEach(statsVM.stats, id: \.identityKey) { stat in
+                PlayerStatTab(stat: stat)
+                    .padding(.horizontal)
+            }
         }
-        isLoading = false
+    }
+
+    private func fetchStats() async {
+        await statsVM.fetch(
+            for: regionToCode(selectedRegion),
+            for: timeRangeToAPIValue(selectedTimeRange)
+        )
     }
     
     private func regionToCode(_ region: String) -> String {

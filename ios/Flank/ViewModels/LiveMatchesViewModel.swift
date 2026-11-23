@@ -7,7 +7,7 @@ import Foundation
 
 @MainActor
 final class ShowLive: V3MatchListStore {
-    init(client: VLRAPIClient = .init(), defaults: UserDefaults = .standard) {
-        super.init(query: .liveScore, client: client, defaults: defaults)
+    init(client: VLRAPIClient = .init(), cache: ListCache = .shared) {
+        super.init(query: .liveScore, client: client, cache: cache)
     }
 }

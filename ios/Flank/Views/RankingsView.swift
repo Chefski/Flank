@@ -20,7 +20,7 @@ struct RankingsView: View {
     @StateObject var rankings = ShowRankings()
     @AppStorage("defaultRegion") private var defaultRegion = "na"
     @State private var selectedRegion: String = ""
-    @State private var isLoading = false
+    @State private var retryToken = 0
     
     @State private var showingRegionPicker = true
     @State private var searchText = ""
@@ -102,19 +102,10 @@ struct RankingsView: View {
                         .frame(height: 0)
                         .id(Self.scrollTopID)
 
-                    if isLoading {
-                        ProgressView()
-                            .padding()
-                    } else {
-                        LazyVStack {
-                            ForEach(filteredRankings, id: \.self) { ranking in
-                                RankingsTab(team: ranking, searchText: searchText)
-                            }
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.top)
-                        .padding(.bottom, 120)
-                    }
+                    rankingsContent
+                }
+                .refreshable {
+                    await rankings.fetch(for: selectedRegion)
                 }
                 .ignoresSafeArea(.container, edges: .bottom)
                 .mask {
@@ -148,11 +139,56 @@ struct RankingsView: View {
                 selectedRegion = defaultRegion
             }
         }
-        .task(id: selectedRegion) {
+        .task(id: "\(selectedRegion)-\(retryToken)") {
             guard !selectedRegion.isEmpty else {
                 return
             }
-            await fetchRankings(for: selectedRegion)
+            await rankings.fetch(for: selectedRegion)
+        }
+    }
+
+    @ViewBuilder
+    private var rankingsContent: some View {
+        if rankings.rankings.isEmpty {
+            switch rankings.state {
+            case .idle, .loading:
+                ProgressView("Loading rankings…")
+                    .padding(.top, 50)
+            case .failed(let message, let retryable):
+                ListFailureView(
+                    title: "Rankings unavailable",
+                    message: message,
+                    retryable: retryable
+                ) {
+                    Analytics.track(.retryTapped(surface: "rankings"))
+                    retryToken += 1
+                }
+                .padding(.top, 30)
+            case .empty, .loaded, .cachedOffline:
+                ContentUnavailableView(
+                    "No rankings for this region",
+                    systemImage: "medal",
+                    description: Text("VLR.GG didn’t return any ranked teams.")
+                )
+                .padding(.top, 30)
+            }
+        } else {
+            LazyVStack {
+                if case .cachedOffline(let message) = rankings.state {
+                    OfflineBanner(text: "Offline — showing saved rankings", detail: message)
+                        .padding(.horizontal, 8)
+                }
+                if filteredRankings.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                        .padding(.top, 30)
+                }
+                ForEach(filteredRankings, id: \.self) { ranking in
+                    RankingsTab(team: ranking, searchText: searchText)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.top)
+            .padding(.bottom, 120)
         }
     }
 
@@ -198,17 +234,6 @@ struct RankingsView: View {
         } else {
             return rankings.rankings.filter { $0.team.localizedCaseInsensitiveContains(searchText) }
         }
-    }
-    
-    private func fetchRankings(for region: String) async {
-        isLoading = true
-        defer {
-            if selectedRegion == region {
-                isLoading = false
-            }
-        }
-
-        await rankings.fetch(for: region)
     }
 }
 

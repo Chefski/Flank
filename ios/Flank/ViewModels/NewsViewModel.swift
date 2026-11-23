@@ -80,8 +80,8 @@ struct V3ContentMedia: Codable, Hashable, Identifiable, Sendable {
 struct V3ArticleContent: Codable, Hashable, Sendable {
     let html: String
     let text: String
-    let links: [V3ContentLink]
-    let media: [V3ContentMedia]
+    @DefaultEmpty var links: [V3ContentLink]
+    @DefaultEmpty var media: [V3ContentMedia]
 
     var hasReadableBody: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -109,27 +109,18 @@ struct V3NewsArticle: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-enum V3NewsListLoadState: Equatable {
-    case idle
-    case loading
-    case loaded
-    case empty
-    case cachedOffline(String)
-    case failed(message: String, retryable: Bool)
-}
-
 @MainActor
 final class ShowNews: ObservableObject {
     @Published private(set) var articles: [V3NewsSummary] = []
-    @Published private(set) var state: V3NewsListLoadState = .idle
+    @Published private(set) var state: ListLoadState = .idle
 
     private let client: VLRAPIClient
-    private let defaults: UserDefaults
+    private let cache: ListCache
     private let cacheKey = "v3.news.page.1"
 
-    init(client: VLRAPIClient = .init(), defaults: UserDefaults = .standard) {
+    init(client: VLRAPIClient = .init(), cache: ListCache = .shared) {
         self.client = client
-        self.defaults = defaults
+        self.cache = cache
         loadCache()
     }
 
@@ -148,43 +139,18 @@ final class ShowNews: ObservableObject {
             return
         } catch {
             guard !Task.isCancelled else { return }
-            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            if articles.isEmpty {
-                Analytics.track(
-                    .loadFailed(
-                        surface: "news",
-                        category: AnalyticsErrorCategory(error),
-                        retryable: (error as? VLRAPIError)?.isRetryable ?? true
-                    )
-                )
-                state = .failed(
-                    message: message,
-                    retryable: (error as? VLRAPIError)?.isRetryable ?? true
-                )
-            } else {
-                Analytics.track(
-                    .offlineCachePresented(
-                        surface: "news",
-                        category: AnalyticsErrorCategory(error)
-                    )
-                )
-                state = .cachedOffline(message)
-            }
+            state = .afterFailure(error, hasContent: !articles.isEmpty, surface: "news")
         }
     }
 
     private func loadCache() {
-        guard let data = defaults.data(forKey: cacheKey),
-              let cached = try? VLRAPI.decoder.decode([V3NewsSummary].self, from: data) else {
-            return
-        }
+        guard let cached = cache.load([V3NewsSummary].self, forKey: cacheKey) else { return }
         articles = cached
         state = cached.isEmpty ? .empty : .loaded
     }
 
     private func saveCache() {
-        guard let encoded = try? VLRAPI.encoder.encode(articles) else { return }
-        defaults.set(encoded, forKey: cacheKey)
+        cache.save(articles, forKey: cacheKey)
     }
 }
 

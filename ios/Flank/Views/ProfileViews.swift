@@ -53,7 +53,7 @@ struct V2EventPlacement: Decodable, Sendable {
     let url: String?
 
     var identityKey: String {
-        url ?? "\(event)|\(series ?? "")|\(placement ?? "")|\(team ?? "")|\(date ?? "")"
+        "\(url ?? "")|\(event)|\(series ?? "")|\(placement ?? "")|\(team ?? "")|\(date ?? "")"
     }
 }
 
@@ -244,8 +244,15 @@ final class TeamProfileViewModel: ObservableObject {
         self.client = client
     }
 
-    func load() async {
-        state = .loading
+    /// Loads the profile once; later calls (e.g. when the view reappears) keep what is
+    /// on screen. `forceRefresh` reloads in place and keeps loaded content if it fails.
+    func load(forceRefresh: Bool = false) async {
+        let hasContent: Bool
+        if case .loaded = state { hasContent = true } else { hasContent = false }
+        guard forceRefresh || !hasContent else { return }
+        if !hasContent {
+            state = .loading
+        }
         let client = client
         let teamID = teamID
         async let profileResult = capturedProfileRequest { try await client.fetchTeamProfile(id: teamID) }
@@ -261,7 +268,12 @@ final class TeamProfileViewModel: ObservableObject {
                 )
             )
         }
-        state = Self.resolve(profile: profile, matches: matches)
+        let resolved = Self.resolve(profile: profile, matches: matches)
+        if hasContent, case .failed = resolved {
+            // A failed refresh keeps the profile that is already on screen.
+            return
+        }
+        state = resolved
     }
 
     private static func resolve(
@@ -313,8 +325,15 @@ final class PlayerProfileViewModel: ObservableObject {
         self.client = client
     }
 
-    func load() async {
-        state = .loading
+    /// Loads the profile once; later calls (e.g. when the view reappears) keep what is
+    /// on screen. `forceRefresh` reloads in place and keeps loaded content if it fails.
+    func load(forceRefresh: Bool = false) async {
+        let hasContent: Bool
+        if case .loaded = state { hasContent = true } else { hasContent = false }
+        guard forceRefresh || !hasContent else { return }
+        if !hasContent {
+            state = .loading
+        }
         let client = client
         let playerID = playerID
         async let profileResult = capturedProfileRequest { try await client.fetchPlayerProfile(id: playerID) }
@@ -330,7 +349,12 @@ final class PlayerProfileViewModel: ObservableObject {
                 )
             )
         }
-        state = Self.resolve(profile: profile, matches: matches)
+        let resolved = Self.resolve(profile: profile, matches: matches)
+        if hasContent, case .failed = resolved {
+            // A failed refresh keeps the profile that is already on screen.
+            return
+        }
+        state = resolved
     }
 
     private static func resolve(
@@ -398,6 +422,9 @@ struct TeamProfileView: View {
         .navigationTitle(fallbackName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                FavoriteTeamButton(teamID: teamID, name: displayName, logo: displayLogo)
+            }
             externalLink(
                 path: "/team/\(teamID)",
                 label: "View team on VLR.GG",
@@ -407,6 +434,9 @@ struct TeamProfileView: View {
             )
         }
         .task(id: reloadToken) { await viewModel.load() }
+        .onChange(of: displayName, initial: true) { _, name in
+            FavoriteTeamsStore.shared.refreshDetails(teamID: teamID, name: name, logo: displayLogo)
+        }
         .onAppear {
             guard !hasTrackedOpen else { return }
             hasTrackedOpen = true
@@ -418,6 +448,26 @@ struct TeamProfileView: View {
                 )
             )
         }
+    }
+
+    private var loadedProfile: V2TeamProfile? {
+        if case .loaded(let profile, _, _, _) = viewModel.state { return profile }
+        return nil
+    }
+
+    private var displayName: String {
+        (loadedProfile?.name).nonEmpty ?? fallbackName
+    }
+
+    /// The logo saved with a favourite. Match lists show logos on a dark card, so this
+    /// prefers the dark variant like they do.
+    private var displayLogo: String? {
+        VLRAPI.preferredLogo(
+            fallback: loadedProfile?.logo ?? fallbackLogo,
+            light: loadedProfile?.logoLight,
+            dark: loadedProfile?.logoDark,
+            for: .dark
+        )
     }
 
     @ViewBuilder
@@ -461,7 +511,7 @@ struct TeamProfileView: View {
                 }
                 .padding()
             }
-            .refreshable { reloadToken += 1 }
+            .refreshable { await viewModel.load(forceRefresh: true) }
         }
     }
 }
@@ -546,7 +596,7 @@ struct PlayerProfileView: View {
                 }
                 .padding()
             }
-            .refreshable { reloadToken += 1 }
+            .refreshable { await viewModel.load(forceRefresh: true) }
         }
     }
 }

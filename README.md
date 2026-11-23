@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/iOS-15.0+-blue.svg" alt="iOS 15.0+">
+  <img src="https://img.shields.io/badge/iOS-26.0+-blue.svg" alt="iOS 26.0+">
   <img src="https://img.shields.io/badge/swift-%23FA7343.svg?style=flat&logo=swift&logoColor=white" alt="Swift">
   <img src="https://img.shields.io/badge/swiftui-%2302569B.svg?style=flat&logo=swift&logoColor=white" alt="SwiftUI">
 </p>
@@ -84,4 +84,4 @@ Keeping release-only changes out of `main` ensures every Xcode Cloud build corre
 Flank relies on the following amazing resources:
 
 - [VLR.gg](https://vlr.gg) - The premier source for Valorant esports coverage, news, and match data
-- [Flank VLR API](https://flank-vlr-api.vercel.app/) - The API in `api/` powering Flank's VLR.gg data, built on [vlrggapi](https://github.com/axsddlr/vlrggapi) by Andre Saddler
+- [Flank VLR API](https://flank-vlr-api.vercel.app/) - The v2 and v3 APIs in `api/` powering Flank's VLR.gg data, built on [vlrggapi](https://github.com/axsddlr/vlrggapi) by Andre Saddler

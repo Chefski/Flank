@@ -37,6 +37,8 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                FavoriteTeamsSection()
+
                 Section(header: Text("Info"), footer: Text("General app information")) {
                     Button(action: {
                         showAboutView = true
@@ -49,7 +51,7 @@ struct SettingsView: View {
                     }) {
                         Label("Terms of service", systemImage: "doc.text")
                     }
-                    .sheet(isPresented: $showTermsOfService) {
+                    .safariView(isPresented: $showTermsOfService) {
                         SafariView(
                             url: URL(string: "https://chef.ski/flank-terms-conditions")!,
                             configuration: SafariView.Configuration(
@@ -60,14 +62,13 @@ struct SettingsView: View {
                         .preferredBarAccentColor(.clear)
                         .preferredControlAccentColor(.accentColor)
                         .dismissButtonStyle(.done)
-                        .ignoresSafeArea()
                     }
                     Button(action: {
                         showPrivacyPolicy = true
                     }) {
                         Label("Privacy Policy", systemImage: "shield")
                     }
-                    .sheet(isPresented: $showPrivacyPolicy) {
+                    .safariView(isPresented: $showPrivacyPolicy) {
                         SafariView(
                             url: URL(string: "https://chef.ski/flank-privacy-policy")!,
                             configuration: SafariView.Configuration(
@@ -78,7 +79,6 @@ struct SettingsView: View {
                         .preferredBarAccentColor(.clear)
                         .preferredControlAccentColor(.accentColor)
                         .dismissButtonStyle(.done)
-                        .ignoresSafeArea()
                     }
                 }
                 

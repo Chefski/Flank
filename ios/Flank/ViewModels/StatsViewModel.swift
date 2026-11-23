@@ -38,29 +38,35 @@ struct PlayerStats: Hashable, Codable {
 
 @MainActor
 final class ShowStats: ObservableObject {
-    @Published var stats: [PlayerStats] = []
+    @Published private(set) var stats: [PlayerStats] = []
+    @Published private(set) var state: ListLoadState = .idle
+
+    /// Bumped per fetch so a slower, older request (e.g. a pull-to-refresh for the
+    /// previous filters) can't overwrite the selection the user switched to.
+    private var latestRequest = 0
+    private let cache: ListCache
+
+    init(cache: ListCache = .shared) {
+        self.cache = cache
+    }
 
     private func cacheKey(region: String, timespan: String) -> String {
         "cachedPlayerStats.\(region).\(timespan)"
     }
 
     private func loadCachedStats(region: String, timespan: String) {
-        if let data = UserDefaults.standard.data(forKey: cacheKey(region: region, timespan: timespan)),
-           let cachedRankings = try? JSONDecoder().decode([PlayerStats].self, from: data) {
-            stats = cachedRankings
-        } else {
-            stats = []
-        }
+        stats = cache.load([PlayerStats].self, forKey: cacheKey(region: region, timespan: timespan)) ?? []
     }
     
     private func cacheStats(region: String, timespan: String) {
-        if let encodedData = try? JSONEncoder().encode(stats) {
-            UserDefaults.standard.set(encodedData, forKey: cacheKey(region: region, timespan: timespan))
-        }
+        cache.save(stats, forKey: cacheKey(region: region, timespan: timespan))
     }
     
     func fetch(for region: String, for timespan: String) async {
+        latestRequest += 1
+        let request = latestRequest
         loadCachedStats(region: region, timespan: timespan)
+        state = stats.isEmpty ? .loading : .loaded
 
         do {
             let response = try await VLRAPI.fetch(
@@ -71,33 +77,16 @@ final class ShowStats: ObservableObject {
                     URLQueryItem(name: "timespan", value: timespan),
                 ]
             )
-
-            guard !Task.isCancelled else {
-                return
-            }
+            try Task.checkCancellation()
+            guard request == latestRequest else { return }
             stats = response.segments
+            state = response.segments.isEmpty ? .empty : .loaded
             cacheStats(region: region, timespan: timespan)
+        } catch is CancellationError {
+            return
         } catch {
-            guard !Task.isCancelled else {
-                return
-            }
-            if stats.isEmpty {
-                Analytics.track(
-                    .loadFailed(
-                        surface: "stats",
-                        category: AnalyticsErrorCategory(error),
-                        retryable: (error as? VLRAPIError)?.isRetryable ?? true
-                    )
-                )
-            } else {
-                Analytics.track(
-                    .offlineCachePresented(
-                        surface: "stats",
-                        category: AnalyticsErrorCategory(error)
-                    )
-                )
-            }
-            print(error)
+            guard !Task.isCancelled, request == latestRequest else { return }
+            state = .afterFailure(error, hasContent: !stats.isEmpty, surface: "stats")
         }
     }
 }
