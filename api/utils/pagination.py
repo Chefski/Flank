@@ -18,7 +18,12 @@ from utils.constants import (
     MAX_MATCH_TIMEOUT,
     PAGINATION_SEMAPHORE_LIMIT,
 )
-from utils.http_client import get_http_client
+from utils.http_client import (
+    CircuitOpenError,
+    fetch_with_retries,
+    get_http_client,
+    is_pushback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +68,9 @@ async def scrape_multiple_pages(
     page_url_func: Callable[[str, int], str] | None = None,
 ) -> dict:
     """
-    Generic multi-page scraper with retry and exponential backoff.
+    Generic multi-page scraper. Each page is one ``fetch_with_retries`` call
+    (bounded retries with backoff); a page that still fails is listed in the
+    502, and pushback (403/429, or 503 with Retry-After) stops further pages.
 
     Args:
         base_url: The base URL for page 1 (e.g. "https://www.vlr.gg/matches").
@@ -114,50 +121,49 @@ async def scrape_multiple_pages(
         start_page, end_page, total_pages, config.request_delay,
     )
 
+    pushback_page: int | None = None
+
     for page in range(start_page, end_page + 1):
-        page_success = False
-        retry_count = 0
+        url = page_url_func(base_url, page)
+        logger.info("Scraping page %d (%d/%d)", page, page - start_page + 1, total_pages)
 
-        while not page_success and retry_count < config.max_retries:
-            try:
-                url = page_url_func(base_url, page)
-                logger.info(
-                    "Scraping page %d (%d/%d) attempt %d/%d",
-                    page, page - start_page + 1, total_pages,
-                    retry_count + 1, config.max_retries,
+        # fetch_with_retries owns the per-page retries, so the shared circuit
+        # sees one outcome per page, not one per attempt, and the shared
+        # pacing, cooldown and circuit apply to every request.
+        try:
+            async with _pagination_semaphore:
+                resp = await fetch_with_retries(
+                    url,
+                    client=client,
+                    timeout=config.timeout,
+                    max_retries=config.max_retries,
+                    request_delay=config.request_delay,
                 )
-
-                async with _pagination_semaphore:
-                    resp = await client.get(url, timeout=config.timeout)
-
-                if resp.status_code != 200:
-                    logger.warning("Page %d returned status %d", page, resp.status_code)
-                    retry_count += 1
-                    if retry_count < config.max_retries:
-                        await asyncio.sleep(config.request_delay * (2 ** retry_count))
-                    continue
-
-                html = HTMLParser(resp.text)
-                page_results = parse_func(html, page)
-                result.extend(page_results)
-                logger.info("Page %d: %d items", page, len(page_results))
-                page_success = True
-
-                if page < end_page:
-                    await asyncio.sleep(config.request_delay)
-
-            except Exception as e:
-                retry_count += 1
-                logger.warning(
-                    "Error on page %d attempt %d/%d: %s",
-                    page, retry_count, config.max_retries, e,
-                )
-                if retry_count < config.max_retries:
-                    await asyncio.sleep(config.request_delay * (2 ** retry_count))
-
-        if not page_success:
+        except CircuitOpenError:
+            raise
+        except Exception as e:
+            logger.warning("Error on page %d after retries: %s", page, type(e).__name__)
             failed_pages.append(page)
-            logger.error("Failed page %d after %d attempts", page, config.max_retries)
+            continue
+
+        if is_pushback(resp):
+            # Rate limited or blocked: stop here; asking for more only makes it worse.
+            logger.warning("Page %d returned status %d; stopping", page, resp.status_code)
+            pushback_page = page
+            failed_pages.extend(range(page, end_page + 1))
+            break
+
+        if resp.status_code != 200:
+            logger.warning("Page %d returned status %d after retries", page, resp.status_code)
+            failed_pages.append(page)
+            continue
+
+        page_results = parse_func(HTMLParser(resp.text), page)
+        result.extend(page_results)
+        logger.info("Page %d: %d items", page, len(page_results))
+
+        if page < end_page:
+            await asyncio.sleep(config.request_delay)
 
     successful_pages = total_pages - len(failed_pages)
     logger.info(
@@ -167,13 +173,13 @@ async def scrape_multiple_pages(
 
     if failed_pages:
         failed_pages_text = ", ".join(str(page) for page in failed_pages)
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Failed to fetch all requested pages from VLR.GG. "
-                f"Pages with exhausted retries: {failed_pages_text}."
-            ),
+        detail = (
+            "Failed to fetch all requested pages from VLR.GG. "
+            f"Pages with exhausted retries: {failed_pages_text}."
         )
+        if pushback_page is not None:
+            detail += f" VLR.GG asked us to slow down at page {pushback_page}; later pages were not requested."
+        raise HTTPException(status_code=502, detail=detail)
 
     return {
         "data": {

@@ -139,11 +139,14 @@ async def vlr_events(upcoming=True, completed=True, page=1, live=False):
         if show_live:
             client = get_http_client()
             home_resp = await fetch_with_retries(VLR_BASE_URL, client=client)
-            if home_resp.status_code < 400:
-                home_html = parse_html(home_resp.text)
-                live_container = home_html.css_first("div.js-home-events")
-                if live_container:
-                    events.extend(_parse_home_sidebar_events_by_label(live_container, "live"))
+            if home_resp.status_code >= 400:
+                # Never report a pushback as "no live events": an error payload
+                # is not cached and lets the stale fallback serve the last list.
+                return upstream_error_payload(home_resp.status_code, "live events")
+            home_html = parse_html(home_resp.text)
+            live_container = home_html.css_first("div.js-home-events")
+            if live_container:
+                events.extend(_parse_home_sidebar_events_by_label(live_container, "live"))
 
         return {"data": {"status": status, "segments": events}}
 

@@ -1,19 +1,25 @@
 """Shared-cache (Vercel edge) Cache-Control headers."""
+import asyncio
+
 import pytest
 
 from utils.cache_headers import (
     MATCH_DETAIL,
     NO_STORE,
     PRIVATE_REVALIDATE,
+    cap_edge_ttl,
+    mark_stale,
     route_ttl,
     shared_cache_control,
     stale_while_revalidate,
 )
+from utils.cache_manager import CacheManager
 from utils.constants import (
     CACHE_TTL_EVENT_MATCHES,
     CACHE_TTL_EVENTS,
     CACHE_TTL_LIVE,
     CACHE_TTL_MATCH_DETAIL,
+    CACHE_TTL_MATCH_DETAIL_FINAL,
     CACHE_TTL_MATCH_DETAIL_LIVE,
     CACHE_TTL_NEWS,
     CACHE_TTL_NEWS_ARTICLE,
@@ -21,12 +27,14 @@ from utils.constants import (
     CACHE_TTL_PLAYER_MATCHES,
     CACHE_TTL_RANKINGS,
     CACHE_TTL_RESULTS,
+    CACHE_TTL_STALE_FALLBACK_EDGE,
     CACHE_TTL_STATS,
     CACHE_TTL_TEAM,
     CACHE_TTL_TEAM_MATCHES,
     CACHE_TTL_TEAM_SCHEDULE,
     CACHE_TTL_UPCOMING,
 )
+from utils.http_client import UpstreamCooldownError
 
 
 @pytest.mark.parametrize(
@@ -136,7 +144,11 @@ def _detail(status: str):
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "status,ttl",
-    [("LIVE", CACHE_TTL_MATCH_DETAIL_LIVE), ("final", CACHE_TTL_MATCH_DETAIL)],
+    [
+        ("LIVE", CACHE_TTL_MATCH_DETAIL_LIVE),
+        ("final", CACHE_TTL_MATCH_DETAIL_FINAL),
+        ("", CACHE_TTL_MATCH_DETAIL),
+    ],
 )
 async def test_match_detail_ttl_follows_live_status(async_client, monkeypatch, status, ttl):
     monkeypatch.setattr("routers.v3_router.get_match_detail_data", _detail(status))
@@ -229,3 +241,67 @@ async def test_health_and_non_get_requests_are_left_alone(async_client, monkeypa
 
     assert "s-maxage" not in health.headers.get("cache-control", "")
     assert "s-maxage" not in post.headers.get("cache-control", "")
+
+
+@pytest.mark.anyio
+async def test_edge_ttl_cap_set_in_a_child_task_reaches_the_response(async_client, monkeypatch):
+    """The cap crosses BaseHTTPMiddleware (rate limiter) and create_task boundaries."""
+    final_detail = _detail("final")
+
+    async def capped_detail(match_id, light=False):
+        async def child():
+            cap_edge_ttl(CACHE_TTL_MATCH_DETAIL_LIVE)
+            cap_edge_ttl(CACHE_TTL_MATCH_DETAIL)  # a larger cap never raises it
+
+        await asyncio.create_task(child())
+        return await final_detail(match_id, light)
+
+    monkeypatch.setattr("routers.v3_router.get_match_detail_data", capped_detail)
+
+    resp = await async_client.get("/v3/matches/42")
+
+    assert resp.status_code == 200
+    assert f"s-maxage={CACHE_TTL_MATCH_DETAIL_LIVE}," in resp.headers["cache-control"]
+    assert "x-data-stale" not in resp.headers
+
+    # The next request starts from a clean slate.
+    monkeypatch.setattr("routers.v3_router.get_match_detail_data", final_detail)
+    resp = await async_client.get("/v3/matches/43")
+    assert f"s-maxage={CACHE_TTL_MATCH_DETAIL_FINAL}," in resp.headers["cache-control"]
+
+
+@pytest.mark.anyio
+async def test_stale_fallback_gets_a_short_edge_ttl_and_a_stale_header(async_client, monkeypatch):
+    cache = CacheManager()
+    responses = [
+        {"data": {"status": 200, "segments": [], "meta": {"record_schema": "match-list"}}},
+        UpstreamCooldownError("cooling down"),
+    ]
+
+    async def producer():
+        response = responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    async def matches(*args, **kwargs):
+        return await cache.get_or_create_async(CACHE_TTL_UPCOMING, producer, "matches", "upcoming")
+
+    monkeypatch.setattr("routers.v3_router.get_match_data", matches)
+
+    fresh = await async_client.get("/v3/matches?q=upcoming")
+    assert "s-maxage=300," in fresh.headers["cache-control"]
+    assert "x-data-stale" not in fresh.headers
+
+    cache._caches[str(CACHE_TTL_UPCOMING)].clear()
+    stale = await async_client.get("/v3/matches?q=upcoming")
+
+    assert stale.status_code == 200
+    assert stale.json() == fresh.json()
+    assert stale.headers["cache-control"] == shared_cache_control(CACHE_TTL_STALE_FALLBACK_EDGE)
+    assert stale.headers["x-data-stale"] == "1"
+
+
+def test_edge_hints_are_a_no_op_outside_a_request():
+    cap_edge_ttl(5)
+    mark_stale()

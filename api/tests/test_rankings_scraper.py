@@ -1,3 +1,4 @@
+import httpx
 import pytest
 from selectolax.lexbor import LexborHTMLParser as HTMLParser
 
@@ -129,8 +130,8 @@ async def test_vlr_rankings_preserves_current_output_shape(monkeypatch):
         }
     }
     assert client.calls == [
-        ("https://www.vlr.gg/rankings/north-america", None),
-        ("https://www.vlr.gg/rankings/north-america", None),
+        ("https://www.vlr.gg/rankings/north-america", httpx.USE_CLIENT_DEFAULT),
+        ("https://www.vlr.gg/rankings/north-america", httpx.USE_CLIENT_DEFAULT),
     ]
     assert {headers["Cookie"] for headers in client.request_headers} == {
         "settings=%7B%22dark_mode%22%3A0%7D",

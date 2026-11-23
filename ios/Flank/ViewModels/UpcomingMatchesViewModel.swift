@@ -18,18 +18,44 @@ enum ListLoadState: Equatable {
 
     /// The state after a failed load. Content already on screen stays visible with a
     /// notice saying why; otherwise the screen shows an error with an optional retry.
+    ///
+    /// - Parameter previous: The state before this load. The failure is only reported
+    ///   when the state changes into saved or failed, so a poller that keeps failing
+    ///   doesn't send an event per tick.
     @MainActor
-    static func afterFailure(_ error: Error, hasContent: Bool, surface: String) -> ListLoadState {
+    static func afterFailure(
+        _ error: Error,
+        hasContent: Bool,
+        surface: String,
+        previous: ListLoadState? = nil
+    ) -> ListLoadState {
         let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         let category = AnalyticsErrorCategory(error)
         if hasContent {
-            Analytics.track(.offlineCachePresented(surface: surface, category: category))
+            if previous?.isShowingSaved != true {
+                Analytics.track(.offlineCachePresented(surface: surface, category: category))
+            }
             return .showingSaved(message: message, isOffline: category == .offline)
         }
         let retryable = (error as? VLRAPIError)?.isRetryable ?? true
-        Analytics.track(.loadFailed(surface: surface, category: category, retryable: retryable))
+        if previous?.isFailed != true {
+            Analytics.track(.loadFailed(surface: surface, category: category, retryable: retryable))
+        }
         return .failed(message: message, retryable: retryable)
     }
+
+    var isShowingSaved: Bool {
+        if case .showingSaved = self { return true }
+        return false
+    }
+
+    var isFailed: Bool {
+        if case .failed = self { return true }
+        return false
+    }
+
+    /// The last refresh failed, whether or not saved content is on screen.
+    var isFailing: Bool { isShowingSaved || isFailed }
 }
 
 @MainActor
@@ -54,7 +80,13 @@ class V3MatchListStore: ObservableObject {
         loadCache()
     }
 
+    /// When the last fetch finished, successful or not; periodic refreshes count their
+    /// interval from here, so a slow or timed-out request doesn't shorten the gap.
+    private(set) var lastFetchFinishedAt: Date?
+
     func fetch() async {
+        let previous = state
+        defer { lastFetchFinishedAt = Date() }
         if matches.isEmpty {
             state = .loading
         }
@@ -69,7 +101,12 @@ class V3MatchListStore: ObservableObject {
             return
         } catch {
             guard !Task.isCancelled else { return }
-            state = .afterFailure(error, hasContent: !matches.isEmpty, surface: "matches_\(query.rawValue)")
+            state = .afterFailure(
+                error,
+                hasContent: !matches.isEmpty,
+                surface: "matches_\(query.rawValue)",
+                previous: previous
+            )
         }
     }
 

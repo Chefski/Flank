@@ -15,6 +15,7 @@ from api.scrapers.match_detail.parsers import (
     _parse_streams_vods,
 )
 from utils.cache_manager import cache_manager
+from utils.constants import CACHE_TTL_MATCH_DETAIL_FINAL, CACHE_TTL_MATCH_DETAIL_LIVE
 from utils.html_parsers import parse_html
 
 # vlr.gg markup since the late-2026 "sm-*" streams/VODs redesign (issue #183).
@@ -363,8 +364,9 @@ async def test_vlr_match_detail_light_skips_the_per_game_tabs(monkeypatch):
     data = await vlr_match_detail("556", light=True)
     segment = data["data"]["segments"][0]
 
-    # Only the base page, fetched once per theme (light + dark logo variants).
-    assert [url for url, _timeout in client.calls] == ["https://www.vlr.gg/556"] * 2
+    # Only the base page. It carries no CDN images, so there is no dark
+    # variant to fetch either.
+    assert [url for url, _timeout in client.calls] == ["https://www.vlr.gg/556"]
     assert segment["economy"] == []
     assert all(entry["rows"] == [] for entry in segment["economy_by_map"])
     assert all(
@@ -850,4 +852,132 @@ async def test_vlr_match_detail_skips_tabs_for_scheduled_games(monkeypatch):
     }
     assert segment["maps"][1]["economy"] == []
     assert all("game=game-2" not in url for url, _ in client.calls)
+    cache_manager.clear_all()
+
+
+# --- partial results and finished-map tab reuse -----------------------------
+
+FINAL_MATCH_HTML = BASE_MATCH_HTML.replace(
+    "<html>", '<html><div class="match-header-vs-note">final</div>', 1
+)
+# Map 1 finished 13-11, map 2 still being played at 5-3.
+LIVE_MATCH_HTML = BASE_MATCH_HTML.replace(
+    "<html>", '<html><div class="match-header-vs-note">LIVE</div>', 1
+).replace(
+    '<div class="team"><div class="score">10</div><div class="mod-ct">4</div><div class="mod-t">6</div></div>\n'
+    '      <div class="team"><div class="score">13</div><div class="mod-ct">7</div><div class="mod-t">6</div></div>',
+    '<div class="team"><div class="score">5</div><div class="mod-ct">4</div><div class="mod-t">1</div></div>\n'
+    '      <div class="team"><div class="score">3</div><div class="mod-ct">2</div><div class="mod-t">1</div></div>',
+)
+
+
+def _install_fake_upstream(monkeypatch, base_html: str, failing: set[str]):
+    """Serve ``base_html`` and every tab; tab URLs containing any of ``failing`` 503."""
+    tab_calls: list[str] = []
+
+    async def fake_theme_variants(url, *, client=None):
+        return FakeResponse(200, base_html), FakeResponse(200, base_html)
+
+    async def fake_fetch(url, *, client=None, timeout=None, **kwargs):
+        tab_calls.append(url.split("?", 1)[1])
+        if any(marker in url for marker in failing):
+            return FakeResponse(503, "<html></html>")
+        if "tab=performance" in url:
+            return FakeResponse(200, performance_html("Opponent"))
+        return FakeResponse(200, economy_html("Team One"))
+
+    monkeypatch.setattr("api.scrapers.match_detail.crawler.get_http_client", lambda: object())
+    monkeypatch.setattr("api.scrapers.match_detail.crawler.fetch_theme_variants", fake_theme_variants)
+    monkeypatch.setattr("api.scrapers.match_detail.crawler.fetch_with_retries", fake_fetch)
+    return tab_calls
+
+
+def _expire_fresh_caches():
+    """Drop every in-process TTL entry but keep the last-good payloads."""
+    cache_manager._caches.clear()
+
+
+@pytest.mark.anyio
+async def test_partial_final_match_is_cached_briefly_and_keeps_the_complete_last_good(monkeypatch):
+    from utils.cache_headers import _edge_hints
+
+    cache_manager.clear_all()
+    key = ("match_detail", "777", False)
+    failing: set[str] = set()
+    _install_fake_upstream(monkeypatch, FINAL_MATCH_HTML, failing)
+
+    complete = await vlr_match_detail("777")
+    assert cache_manager.get(CACHE_TTL_MATCH_DETAIL_FINAL, *key) is complete
+
+    _expire_fresh_caches()
+    failing.add("game=game-2&tab=economy")
+    hints: dict = {}
+    token = _edge_hints.set(hints)
+    try:
+        partial = await vlr_match_detail("777")
+        # A cache hit on the partial payload is capped as well.
+        assert await vlr_match_detail("777") is partial
+    finally:
+        _edge_hints.reset(token)
+
+    assert partial["data"]["segments"][0]["economy_by_map"][1]["rows"] == []
+    assert cache_manager.get(CACHE_TTL_MATCH_DETAIL_FINAL, *key) is None
+    assert cache_manager.get(CACHE_TTL_MATCH_DETAIL_LIVE, *key) is partial
+    assert cache_manager.last_good(*key) is complete
+    assert hints == {"cap": CACHE_TTL_MATCH_DETAIL_LIVE}
+    cache_manager.clear_all()
+
+
+@pytest.mark.anyio
+async def test_complete_final_match_keeps_its_full_edge_ttl(monkeypatch):
+    from utils.cache_headers import _edge_hints
+
+    cache_manager.clear_all()
+    _install_fake_upstream(monkeypatch, FINAL_MATCH_HTML, set())
+    hints: dict = {}
+    token = _edge_hints.set(hints)
+    try:
+        await vlr_match_detail("778")
+    finally:
+        _edge_hints.reset(token)
+    assert hints == {}
+    cache_manager.clear_all()
+
+
+@pytest.mark.anyio
+async def test_live_match_refetches_only_the_map_in_progress(monkeypatch):
+    cache_manager.clear_all()
+    failing = {"game=game-1&tab=economy"}
+    tab_calls = _install_fake_upstream(monkeypatch, LIVE_MATCH_HTML, failing)
+
+    first = await vlr_match_detail("999")
+    assert sorted(tab_calls) == [
+        "game=game-1&tab=economy",
+        "game=game-1&tab=performance",
+        "game=game-2&tab=economy",
+        "game=game-2&tab=performance",
+    ]
+    assert first["data"]["segments"][0]["maps"][0]["status"] == "completed"
+    assert first["data"]["segments"][0]["maps"][1]["status"] == "in_progress"
+
+    # 30 s later: the finished map's performance tab is reused; its economy
+    # tab failed last time, so it is fetched again, as is the live map.
+    tab_calls.clear()
+    failing.clear()
+    cache_manager.invalidate(CACHE_TTL_MATCH_DETAIL_LIVE, "match_detail", "999", False)
+    second = await vlr_match_detail("999")
+    assert sorted(tab_calls) == [
+        "game=game-1&tab=economy",
+        "game=game-2&tab=economy",
+        "game=game-2&tab=performance",
+    ]
+    map_one = second["data"]["segments"][0]["maps"][0]
+    assert map_one["performance"]["advanced_stats"][0]["2K"] == "3"
+    assert map_one["economy"][0]["team_id"] == "100"
+
+    tab_calls.clear()
+    cache_manager.invalidate(CACHE_TTL_MATCH_DETAIL_LIVE, "match_detail", "999", False)
+    third = await vlr_match_detail("999")
+    assert sorted(tab_calls) == ["game=game-2&tab=economy", "game=game-2&tab=performance"]
+    assert third["data"]["segments"][0]["maps"][0] == map_one
     cache_manager.clear_all()

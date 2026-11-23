@@ -7,6 +7,8 @@
 
 import SwiftUI
 
+/// The Teams board of the Rankings tab: VLR.GG team rankings by region. It has no
+/// navigation stack of its own; `RankingsHubView` hosts it.
 struct RankingsView: View {
     private static let scrollTopID = "rankings-scroll-top"
 
@@ -45,7 +47,7 @@ struct RankingsView: View {
     ]
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
             if showingRegionPicker {
                 ZStack {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -127,7 +129,6 @@ struct RankingsView: View {
                     }
                 }
             }
-            .navigationTitle("Rankings")
         }
         .overlay(alignment: .bottom) {
             searchPill
@@ -243,5 +244,8 @@ struct RankingsView: View {
 }
 
 #Preview {
-    RankingsView()
+    NavigationStack {
+        RankingsView()
+            .navigationTitle("Rankings")
+    }
 }

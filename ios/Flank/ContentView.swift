@@ -8,41 +8,47 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var selectedTab: Tab = .matches
+    @State private var selectedTab: PrimaryTab = .matches
     @State private var rankingsScrollToTopTrigger = 0
     @State private var hasTrackedInitialTab = false
-    
-    enum Tab {
+    @State private var searchQuery = ""
+
+    // Not named `Tab`, which would shadow SwiftUI's `Tab` used below.
+    enum PrimaryTab: Hashable {
         case matches
+        case events
+        /// Team rankings and player stats, switched inside the tab.
         case rankings
         case news
-        case stats
+        case search
     }
-    
+
     var body: some View {
         TabView(selection: tabSelection) {
-            HomeView()
-                .tabItem {
-                    Label("Matches", systemImage: "gamecontroller.fill")
-                }
-                .tag(Tab.matches)
-            RankingsView(scrollToTopTrigger: rankingsScrollToTopTrigger)
-                .tabItem {
-                    Label("Rankings", systemImage: "medal.fill")
-                }
-                .tag(Tab.rankings)
-            
-            NewsView()
-                .tabItem {
-                    Label("News", systemImage: "newspaper.fill")
-                }
-                .tag(Tab.news)
-            StatsView()
-                .tabItem {
-                    Label("Stats", systemImage: "chart.bar.fill")
-                }
-                .tag(Tab.stats)
+            Tab("Matches", systemImage: "gamecontroller.fill", value: PrimaryTab.matches) {
+                HomeView()
+            }
+            Tab("Events", systemImage: "trophy.fill", value: PrimaryTab.events) {
+                EventsView()
+            }
+            Tab("Rankings", systemImage: "medal.fill", value: PrimaryTab.rankings) {
+                RankingsHubView(scrollToTopTrigger: rankingsScrollToTopTrigger)
+            }
+            Tab("News", systemImage: "newspaper.fill", value: PrimaryTab.news) {
+                NewsView()
+            }
+            Tab(value: PrimaryTab.search, role: .search) {
+                SearchView(query: $searchQuery)
+            }
         }
+        // Search lives on the TabView, and selecting the search-role tab activates it,
+        // so iOS 26 shows Search as its own button beside the tab bar that expands
+        // into the bottom search field. Without `.searchTabSelection` it renders as
+        // an ordinary fifth tab.
+        .searchable(text: $searchQuery, prompt: "Teams, players, events")
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .tabViewSearchActivation(.searchTabSelection)
         .tint(.primary)
         .onAppear {
             guard !hasTrackedInitialTab else { return }
@@ -51,7 +57,7 @@ struct ContentView: View {
         }
     }
 
-    private var tabSelection: Binding<Tab> {
+    private var tabSelection: Binding<PrimaryTab> {
         Binding(
             get: { selectedTab },
             set: { newTab in
@@ -71,13 +77,14 @@ struct ContentView: View {
     }
 }
 
-private extension ContentView.Tab {
+private extension ContentView.PrimaryTab {
     var analyticsName: String {
         switch self {
         case .matches: "matches"
+        case .events: "events"
         case .rankings: "rankings"
         case .news: "news"
-        case .stats: "stats"
+        case .search: "search"
         }
     }
 }

@@ -7,3 +7,6 @@ xcuserdata/
 
 .aider*
 .env
+
+# Claude Code agent worktrees
+.claude/

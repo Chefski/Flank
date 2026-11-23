@@ -4,7 +4,7 @@ Scraper for VLR.GG search results.
 Uses vlr.gg's built-in search endpoint to find teams, players, events,
 and series by name. Results are categorized by entity type.
 """
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urljoin
 
 from utils.cache_manager import cache_manager
 from utils.constants import CACHE_TTL_SEARCH, VLR_BASE_URL
@@ -22,12 +22,18 @@ def _extract_id_from_search_href(href: str) -> str:
     return parts[0] if parts else ""
 
 
+# Search result types that are event series rather than single events. vlr.gg
+# links a series hit as /search/r/eventgroup/<id>/...
+_SERIES_TYPES = frozenset({"eventgroup", "series"})
+
+
 def _infer_type_from_href(href: str) -> str:
     """Infer entity type from the search redirect URL path.
 
     /search/r/player/9/idx  → player
     /search/r/team/16647/idx → team
     /search/r/event/...      → event
+    /search/r/eventgroup/... → eventgroup (an event series)
     """
     if not href:
         return "unknown"
@@ -46,7 +52,9 @@ async def vlr_search(query: str) -> dict:
         query: Search term (e.g., player name, team name, event keyword).
 
     Returns:
-        Categorized results dict with players, teams, events keys.
+        Categorized results dict with players, teams, events keys. Every hit
+        in ``events`` carries ``type`` ("event" or "series") and ``url``, the
+        absolute vlr.gg URL of the result.
     """
     async def build():
         encoded = quote_plus(query.strip())
@@ -103,9 +111,12 @@ async def vlr_search(query: str) -> dict:
                 elif entity_type == "team":
                     teams.append(entry)
                     id_mapper.register_team(name, entity_id)
-                elif entity_type in ("event", "series"):
-                    events.append(entry)
-                    id_mapper.register_event(name, entity_id)
+                elif entity_type == "event" or entity_type in _SERIES_TYPES:
+                    kind = "event" if entity_type == "event" else "series"
+                    events.append({**entry, "type": kind, "url": urljoin(VLR_BASE_URL, href)})
+                    if kind == "event":
+                        # A series id is not an event id; never map a name to it.
+                        id_mapper.register_event(name, entity_id)
 
         data = {
             "data": {
@@ -123,5 +134,5 @@ async def vlr_search(query: str) -> dict:
         return data
 
     return await cache_manager.get_or_create_async(
-        CACHE_TTL_SEARCH, build, "search", query.strip()
+        CACHE_TTL_SEARCH, build, "search", query.strip().casefold()
     )

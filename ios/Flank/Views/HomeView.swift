@@ -13,6 +13,7 @@ struct HomeView: View {
     @State private var showingSettings = false
     @State private var lastTrackedSearchContext = ""
     @AppStorage("matchesFavoritesOnly") private var favoritesOnly = false
+    @Environment(\.scenePhase) private var scenePhase
 
     private var favorites: FavoriteTeamsStore { .shared }
 
@@ -97,12 +98,24 @@ struct HomeView: View {
                         await pastResults.fetch()
                     }
                 }
-                .task {
+                .task(id: scenePhase) {
+                    // Refresh live scores while Matches is on screen and the app is in
+                    // the foreground. Coming back to the foreground after the interval
+                    // refreshes straight away.
+                    guard scenePhase == .active else { return }
                     while !Task.isCancelled {
-                        do {
-                            try await Task.sleep(for: .seconds(300))
-                        } catch {
-                            return
+                        let interval = LiveScorePolling.interval(
+                            hasLiveMatches: !liveMatches.matches.isEmpty,
+                            state: liveMatches.state
+                        )
+                        let elapsed = liveMatches.lastFetchFinishedAt.map { Date().timeIntervalSince($0) } ?? 0
+                        if elapsed < interval {
+                            do {
+                                try await Task.sleep(for: .seconds(interval - elapsed))
+                            } catch {
+                                return
+                            }
+                            continue
                         }
                         await liveMatches.fetch()
                     }
@@ -321,6 +334,23 @@ struct HomeView: View {
                 || match.event.stage?.localizedCaseInsensitiveContains(searchText) == true
                 || match.event.series?.localizedCaseInsensitiveContains(searchText) == true
         }
+    }
+}
+
+/// How often the Matches tab refreshes live scores, counted from when the last fetch
+/// finished.
+enum LiveScorePolling {
+    /// The API's edge cache holds live scores for 30 s, so polling at that rate adds no
+    /// load on vlr.gg.
+    static let liveInterval: TimeInterval = 30
+    /// Nothing live, or the last refresh failed (offline, rate limited, server down).
+    static let idleInterval: TimeInterval = 120
+
+    static func interval(hasLiveMatches: Bool, state: ListLoadState) -> TimeInterval {
+        if state.isFailing || !hasLiveMatches {
+            return idleInterval
+        }
+        return liveInterval
     }
 }
 

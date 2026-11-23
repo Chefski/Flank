@@ -5,11 +5,14 @@ Fetches the base match page, extracts game IDs, and concurrently
 fetches performance and economy tabs for enriched per-map data.
 """
 import asyncio
+import copy
 import logging
 
+from utils.cache_headers import cap_edge_ttl
 from utils.cache_manager import cache_manager
 from utils.constants import (
     CACHE_TTL_MATCH_DETAIL,
+    CACHE_TTL_MATCH_DETAIL_FINAL,
     CACHE_TTL_MATCH_DETAIL_LIVE,
     MATCH_DETAIL_TAB_FETCH_CONCURRENCY,
     MATCH_DETAIL_TAB_FETCH_TIMEOUT,
@@ -34,6 +37,37 @@ from .parsers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Every TTL a match detail may be cached under, checked shortest first.
+_MATCH_DETAIL_TTLS = (
+    CACHE_TTL_MATCH_DETAIL_LIVE,
+    CACHE_TTL_MATCH_DETAIL,
+    CACHE_TTL_MATCH_DETAIL_FINAL,
+)
+
+
+# Parsed performance/economy tabs of a map that has finished never change, so
+# a live match only re-fetches the tabs of the map still being played.
+CACHE_TTL_FINISHED_MAP_TAB = CACHE_TTL_MATCH_DETAIL_FINAL
+
+
+def _tab_cache_key(match_id: str, game_id: str, tab: str) -> tuple:
+    return ("match_detail_tab", match_id, game_id, tab)
+
+
+def _parse_tab(tab: str, tab_html: HTMLParser):
+    if tab == "performance":
+        return {
+            "kill_matrix": _parse_kill_matrix(tab_html),
+            "advanced_stats": _parse_advanced_stats(tab_html),
+        }
+    return _parse_economy(tab_html)
+
+
+def _tab_has_data(tab: str, parsed) -> bool:
+    if tab == "performance":
+        return bool(parsed["kill_matrix"] or parsed["advanced_stats"])
+    return bool(parsed)
 
 
 def _extract_game_ids(html: HTMLParser) -> list[str]:
@@ -131,29 +165,40 @@ async def vlr_match_detail(match_id: str, light: bool = False) -> dict:
     Scrape a single VLR.GG match page and return structured match data.
 
     Fetches the base page, then concurrently fetches the performance and
-    economy tabs for every started game. Cache TTL is 30 s for live matches
-    and 300 s for completed matches. With ``light`` the per-map tabs are skipped
-    (upcoming matches have no stats yet), leaving header, teams, maps and
-    head-to-head at roughly one request instead of one per game per tab.
+    economy tabs for every started game; tabs of maps that have finished are
+    reused from a per-map cache. Cache TTL is 30 s for live matches, 1 h for
+    final ones and 300 s otherwise. A payload missing any tab (fetch failed,
+    host cooling down) is cached for 30 s at most, at the edge too, and never
+    replaces a complete last-good payload. With ``light`` the per-map tabs are
+    skipped (upcoming matches have no stats yet), leaving header, teams, maps
+    and head-to-head at roughly one request instead of one per game per tab.
     """
     base_url = f"{VLR_BASE_URL}/{match_id}"
     cache_key = ("match_detail", match_id, bool(light))
 
-    cached = cache_manager.get(CACHE_TTL_MATCH_DETAIL_LIVE, *cache_key)
+    def cached_detail():
+        for ttl in _MATCH_DETAIL_TTLS:
+            cached = cache_manager.get(ttl, *cache_key)
+            if cached is not None:
+                return cached
+        return None
+
+    def respond(result):
+        # The edge never keeps a payload longer than this process does (a
+        # partial final match sits in the 30 s cache, not the 1 h one).
+        ttl = cache_manager.cached_ttl(result, _MATCH_DETAIL_TTLS, *cache_key)
+        if ttl is not None and ttl < CACHE_TTL_MATCH_DETAIL_FINAL:
+            cap_edge_ttl(ttl)
+        return result
+
+    cached = cached_detail()
     if cached is not None:
-        return cached
-    cached = cache_manager.get(CACHE_TTL_MATCH_DETAIL, *cache_key)
-    if cached is not None:
-        return cached
+        return respond(cached)
 
     async def build():
-        cached_live = cache_manager.get(CACHE_TTL_MATCH_DETAIL_LIVE, *cache_key)
-        if cached_live is not None:
-            return cached_live
-
-        cached_complete = cache_manager.get(CACHE_TTL_MATCH_DETAIL, *cache_key)
-        if cached_complete is not None:
-            return cached_complete
+        cached = cached_detail()
+        if cached is not None:
+            return cached
 
         client = get_http_client()
 
@@ -192,6 +237,7 @@ async def vlr_match_detail(match_id: str, light: bool = False) -> dict:
 
         performance_by_game: dict[str, dict] = {}
         economy_by_game: dict[str, list[dict]] = {}
+        failed_tabs: list[tuple[str, str]] = []
 
         if game_ids and not light:
             tab_fetch_semaphore = asyncio.Semaphore(MATCH_DETAIL_TAB_FETCH_CONCURRENCY)
@@ -206,24 +252,43 @@ async def vlr_match_detail(match_id: str, light: bool = False) -> dict:
                         timeout=MATCH_DETAIL_TAB_FETCH_TIMEOUT,
                     )
 
+            parsed_tabs: dict[tuple[str, str], object] = {}
+            to_fetch: list[tuple[str, str]] = []
+            for game_id in game_ids:
+                for tab in ("performance", "economy"):
+                    reused = None
+                    if map_statuses.get(game_id) == "completed":
+                        reused = cache_manager.get(
+                            CACHE_TTL_FINISHED_MAP_TAB, *_tab_cache_key(match_id, game_id, tab)
+                        )
+                    if reused is not None:
+                        # Enrichment below mutates rows; keep the cached copy clean.
+                        parsed_tabs[(game_id, tab)] = copy.deepcopy(reused)
+                    else:
+                        to_fetch.append((game_id, tab))
+
             tab_results = await asyncio.gather(
-                *[
-                    fetch_tab(game_id, tab)
-                    for game_id in game_ids
-                    for tab in ("performance", "economy")
-                ]
+                *[fetch_tab(game_id, tab) for game_id, tab in to_fetch]
             )
 
             for game_id, tab, tab_html in tab_results:
                 if tab_html is None:
+                    failed_tabs.append((game_id, tab))
                     continue
+                parsed = _parse_tab(tab, tab_html)
+                parsed_tabs[(game_id, tab)] = parsed
+                if map_statuses.get(game_id) == "completed" and _tab_has_data(tab, parsed):
+                    cache_manager.set(
+                        CACHE_TTL_FINISHED_MAP_TAB,
+                        copy.deepcopy(parsed),
+                        *_tab_cache_key(match_id, game_id, tab),
+                    )
+
+            for (game_id, tab), parsed in parsed_tabs.items():
                 if tab == "performance":
-                    performance_by_game[game_id] = {
-                        "kill_matrix": _parse_kill_matrix(tab_html),
-                        "advanced_stats": _parse_advanced_stats(tab_html),
-                    }
-                elif tab == "economy":
-                    economy_by_game[game_id] = _parse_economy(tab_html)
+                    performance_by_game[game_id] = parsed
+                else:
+                    economy_by_game[game_id] = parsed
 
         for map_data in maps:
             game_id = map_data["game_id"]
@@ -286,10 +351,27 @@ async def vlr_match_detail(match_id: str, light: bool = False) -> dict:
 
         data = {"data": {"status": http_status, "segments": [segment]}}
 
-        live = _is_live(base_html)
-        ttl = CACHE_TTL_MATCH_DETAIL_LIVE if live else CACHE_TTL_MATCH_DETAIL
-        cache_manager.set_if_cacheable(ttl, data, *cache_key)
+        if _is_live(base_html):
+            ttl = CACHE_TTL_MATCH_DETAIL_LIVE
+        elif str(header_info["status"]).strip().lower() == "final":
+            ttl = CACHE_TTL_MATCH_DETAIL_FINAL
+        else:
+            ttl = CACHE_TTL_MATCH_DETAIL
+        if failed_tabs:
+            logger.warning(
+                "Match detail %s is missing %d tab(s); caching it briefly",
+                match_id, len(failed_tabs),
+            )
+            cache_manager.set_partial_if_cacheable(
+                min(ttl, CACHE_TTL_MATCH_DETAIL_LIVE), data, *cache_key
+            )
+        else:
+            cache_manager.set_if_cacheable(ttl, data, *cache_key)
 
         return data
 
-    return await cache_manager.coalesce_async(f"match_detail:{match_id}:{bool(light)}", build)
+    result = await cache_manager.with_stale_fallback(
+        lambda: cache_manager.coalesce_async(f"match_detail:{match_id}:{bool(light)}", build),
+        *cache_key,
+    )
+    return respond(result)

@@ -402,9 +402,9 @@ GET /v2/match/logs?match_id=766311&game_id=285688
             "t": "0:07", "type": "kill", "player": "Tastyy", "team": 1, "victim": "bstrdd", "victim_team": 2,
             "pos": { "x": 562.3, "y": 584.8 }, "from": { "x": 530.7, "y": 707.5 },
             "positions": [
-              { "player": "conir", "team": 2, "x": 967.4, "y": 418.8, "hp": 112 },
-              { "player": "waved", "team": 2, "x": 464.8, "y": 528.5, "hp": 150 },
-              { "player": "WIRE", "team": 1, "x": 180.8, "y": 642.2, "hp": 198 }
+              { "player": "conir", "team": 2, "x": 967.4, "y": 418.8, "facing": 112, "hp": 112 },
+              { "player": "waved", "team": 2, "x": 464.8, "y": 528.5, "facing": 150, "hp": 150 },
+              { "player": "WIRE", "team": 1, "x": 180.8, "y": 642.2, "facing": 198, "hp": 198 }
             ],
             "source": "Headhunter"
           },
@@ -412,9 +412,9 @@ GET /v2/match/logs?match_id=766311&game_id=285688
             "t": "0:17", "type": "kill", "player": "waved", "team": 2, "victim": "Tastyy", "victim_team": 1,
             "pos": { "x": 240.7, "y": 751.8 }, "from": { "x": 337.2, "y": 608.7 },
             "positions": [
-              { "player": "conir", "team": 2, "x": 845.4, "y": 280.8, "hp": 81 },
-              { "player": "waved", "team": 2, "x": 337.2, "y": 608.7, "hp": 124 },
-              { "player": "WIRE", "team": 1, "x": 38, "y": 361.2, "hp": 8 }
+              { "player": "conir", "team": 2, "x": 845.4, "y": 280.8, "facing": 81, "hp": 81 },
+              { "player": "waved", "team": 2, "x": 337.2, "y": 608.7, "facing": 124, "hp": 124 },
+              { "player": "WIRE", "team": 1, "x": 38, "y": 361.2, "facing": 8, "hp": 8 }
             ],
             "source": "Ghost"
           }
@@ -432,9 +432,9 @@ GET /v2/match/logs?match_id=766311&game_id=285688
             "t": "0:19", "type": "kill", "player": "waved", "team": 2, "victim": "waved", "victim_team": 2,
             "pos": { "x": 1149.6, "y": 749.2 },
             "positions": [
-              { "player": "conir", "team": 2, "x": 1105.6, "y": 659.7, "hp": 4 },
-              { "player": "WIRE", "team": 1, "x": 161.7, "y": 582.9, "hp": 220 },
-              { "player": "Tura", "team": 1, "x": 712.2, "y": 846, "hp": 300 }
+              { "player": "conir", "team": 2, "x": 1105.6, "y": 659.7, "facing": 4, "hp": 4 },
+              { "player": "WIRE", "team": 1, "x": 161.7, "y": 582.9, "facing": 220, "hp": 220 },
+              { "player": "Tura", "team": 1, "x": 712.2, "y": 846, "facing": 300, "hp": 300 }
             ],
             "source": "Fall"
           }
@@ -451,13 +451,13 @@ Reading the payload:
 - `armor` is one of `none`, `light`, `heavy`, `regen`. `credits` is what the player had left after the buy, `spent` a positive amount.
 - `source` is vlr.gg's own label for the damage source: usually a weapon, but ability kills appear by ability name (`Headhunter`) and environmental deaths as `Fall` or `Spike`.
 - A death to the environment is reported as a kill where `player` equals `victim` and `source` is `Fall`/`Spike` — 11 of Abyss's 140 kills here. Do not treat `player == victim` as a parsing bug.
-- `positions` holds every player still in play at that event, with their health. `pos` is where the event happened; `from` is the shooter's position (kills only).
+- `positions` holds every player still in play at that event, with `facing`, their view direction in degrees (0–359). `hp` carries the same number and is deprecated: it was misnamed and never was health. `pos` is where the event happened; `from` is the shooter's position (kills only).
 - Coordinates are vlr.gg's per-map replay pixels, not normalised: Abyss runs to `x = 1157.5` on a nominally 1024-unit map, so scale from the observed range per map rather than assuming 0–1024.
 - A map that was never played returns `rounds: []`. A 22-round response is roughly 128 KB, dominated by `positions`.
 
 ### `GET /v2/match/{match_id}/logs`
 Per-round 2D replay from the `logs` tab of vlr.gg's `/match/<id>` page.
-**Params:** `match_id` (path, required), `game_id` (optional — defaults to the first played map), `include` (optional — `map`, `teams`, `rounds`) | **Cache:** 5 min
+**Params:** `match_id` (path, required), `game_id` (optional — defaults to the first played map), `include` (optional — `map`, `teams`, `rounds`) | **Cache:** 5 min (30 s while the map is in progress or has no replay yet)
 
 ```
 GET /v2/match/773435/logs
@@ -539,6 +539,7 @@ Equivalent to `GET /v2/match/logs?match_id=...`; the query form remains supporte
                     "team": 2,
                     "x": 106.6,
                     "y": 521.6,
+                    "facing": 296,
                     "hp": 296
                   },
                   {
@@ -546,6 +547,7 @@ Equivalent to `GET /v2/match/logs?match_id=...`; the query form remains supporte
                     "team": 2,
                     "x": 106.2,
                     "y": 478.8,
+                    "facing": 270,
                     "hp": 270
                   },
                   {
@@ -553,6 +555,7 @@ Equivalent to `GET /v2/match/logs?match_id=...`; the query form remains supporte
                     "team": 1,
                     "x": 698.3,
                     "y": 174.7,
+                    "facing": 142,
                     "hp": 142
                   }
                 ],
@@ -619,6 +622,8 @@ GET /v2/event/2124?stage=playoffs
 Cross-entity search for players, teams, and events.
 **Params:** `q` (required) | **Cache:** 5 min
 
+Every hit in `results.events` carries `type`, either `"event"` (a single event; its `id` is an event id) or `"series"` (an event series such as "Valorant Champions Tour"; its `id` is not an event id), and `url`, the absolute vlr.gg URL of the result.
+
 ```
 GET /v2/search?q=tenz
 ```
@@ -634,7 +639,10 @@ GET /v2/search?q=tenz
       "results": {
         "players": [{ "id": "9", "name": "TenZ", "img": "https://owcdn.net/img/...", "description": "", "tag": "" }],
         "teams": [{ "id": "16647", "name": "TenZ and Friends", "img": "https://...", "description": "", "tag": "(inactive)" }],
-        "events": []
+        "events": [
+          { "id": "2283", "name": "Valorant Champions 2025", "img": "https://owcdn.net/img/...", "description": "", "tag": "", "type": "event", "url": "https://www.vlr.gg/search/r/event/2283/idx" },
+          { "id": "14", "name": "Valorant Champions Tour", "img": "https://owcdn.net/img/...", "description": "", "tag": "", "type": "series", "url": "https://www.vlr.gg/search/r/eventgroup/14/idx" }
+        ]
       }
     }
   }

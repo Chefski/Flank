@@ -54,7 +54,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
+    expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-Data-Stale"],
 )
 
 app.include_router(vlr_router)

@@ -187,10 +187,19 @@ async def v3_matches(
     response_model=V3Response[V3MatchDetail, V3EntityMeta],
     summary="Typed match detail",
 )
-async def v3_match_detail(match_id: str):
+async def v3_match_detail(
+    match_id: str,
+    light: bool = Query(
+        False,
+        description=(
+            "Header, teams, maps and head-to-head only, without the per-map "
+            "performance and economy tabs (about one upstream request)."
+        ),
+    ),
+):
     validate_id_param(match_id, "match_id")
     numeric_id = int(match_id)
-    payload = _unwrap(await get_match_detail_data(match_id))
+    payload = _unwrap(await get_match_detail_data(match_id, light=light))
     detail = adapt_match_detail(_first_segment(payload, "Match"))
     return V3Response[V3MatchDetail, V3EntityMeta](
         data=detail,

@@ -6,7 +6,7 @@
 import Foundation
 import SwiftUI
 
-private struct V2ProfileCollection<Value: Decodable & Sendable>: Decodable, Sendable {
+struct V2ProfileCollection<Value: Decodable & Sendable>: Decodable, Sendable {
     let segments: [Value]
 }
 
@@ -32,12 +32,17 @@ struct V2TeamRosterMember: Decodable, Sendable {
     let isCaptain: Bool?
     let role: String?
     let isStaff: Bool?
+    /// Only sent by `/v2/team/{id}/roster` for former and benched members.
+    let dateJoined: String?
+    let dateLeft: String?
 
     enum CodingKeys: String, CodingKey {
         case id, url, alias, avatar, country, role
         case realName = "real_name"
         case isCaptain = "is_captain"
         case isStaff = "is_staff"
+        case dateJoined = "date_joined"
+        case dateLeft = "date_left"
     }
 
     var identityKey: String { id ?? url ?? alias }
@@ -206,7 +211,7 @@ extension VLRAPIClient {
     }
 }
 
-private func capturedProfileRequest<Value: Sendable>(
+func capturedProfileRequest<Value: Sendable>(
     _ operation: @escaping @Sendable () async throws -> Value
 ) async -> Result<Value, VLRAPIError> {
     do {
@@ -392,6 +397,8 @@ private extension Result {
 struct TeamProfileView: View {
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var viewModel: TeamProfileViewModel
+    @StateObject private var sectionsViewModel: TeamSectionsViewModel
+    @State private var selectedSection: TeamProfileSection = .overview
     @State private var reloadToken = 0
     @State private var hasTrackedOpen = false
 
@@ -412,6 +419,7 @@ struct TeamProfileView: View {
         fallbackLogo = logo
         analyticsSource = source
         _viewModel = StateObject(wrappedValue: TeamProfileViewModel(teamID: teamID, client: client))
+        _sectionsViewModel = StateObject(wrappedValue: TeamSectionsViewModel(teamID: teamID, client: client))
     }
 
     var body: some View {
@@ -456,7 +464,7 @@ struct TeamProfileView: View {
     }
 
     private var displayName: String {
-        (loadedProfile?.name).nonEmpty ?? fallbackName
+        (loadedProfile?.name).nilIfBlank ?? fallbackName
     }
 
     /// The logo saved with a favourite. Match lists show logos on a dark card, so this
@@ -483,7 +491,7 @@ struct TeamProfileView: View {
             }
         case .loaded(let profile, let matches, let profileIssue, let matchIssue):
             ScrollView {
-                LazyVStack(spacing: 16) {
+                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                     TeamProfileHeader(
                         name: profile?.name ?? fallbackName,
                         tag: profile?.tag,
@@ -496,22 +504,62 @@ struct TeamProfileView: View {
                         ),
                         description: profile?.description
                     )
+                    .padding([.horizontal, .top])
 
-                    if let profileIssue { ProfileIssueBanner(text: "Profile details unavailable: \(profileIssue)") }
-                    if let matchIssue { ProfileIssueBanner(text: "Match history unavailable: \(matchIssue)") }
-
-                    if let profile {
-                        if profile.hasSnapshot { TeamSnapshotCard(profile: profile) }
-                        TeamRosterCard(members: profile.roster ?? [])
-                        PlacementCard(placements: profile.eventPlacements ?? [])
-                    }
-                    if matchIssue == nil {
-                        ProfileMatchesCard(matches: matches, emptyTitle: "No recent team matches")
+                    Section {
+                        VStack(spacing: 16) {
+                            switch selectedSection {
+                            case .overview:
+                                overview(
+                                    profile: profile,
+                                    matches: matches,
+                                    profileIssue: profileIssue,
+                                    matchIssue: matchIssue
+                                )
+                            case .schedule, .maps, .roster, .transfers:
+                                TeamSectionContent(
+                                    section: selectedSection,
+                                    teamName: displayName,
+                                    viewModel: sectionsViewModel
+                                )
+                            }
+                        }
+                        .id(selectedSection)
+                        .padding(.horizontal)
+                        .padding(.top, 4)
+                        .padding(.bottom, 24)
+                    } header: {
+                        TeamSectionPicker(selection: $selectedSection)
                     }
                 }
-                .padding()
             }
-            .refreshable { await viewModel.load(forceRefresh: true) }
+            .refreshable {
+                if selectedSection == .overview {
+                    await viewModel.load(forceRefresh: true)
+                } else {
+                    await sectionsViewModel.refresh(selectedSection)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func overview(
+        profile: V2TeamProfile?,
+        matches: [V2ProfileMatch],
+        profileIssue: String?,
+        matchIssue: String?
+    ) -> some View {
+        if let profileIssue { ProfileIssueBanner(text: "Profile details unavailable: \(profileIssue)") }
+        if let matchIssue { ProfileIssueBanner(text: "Match history unavailable: \(matchIssue)") }
+
+        if let profile {
+            if profile.hasSnapshot { TeamSnapshotCard(profile: profile) }
+            TeamRosterCard(members: profile.roster ?? [])
+            PlacementCard(placements: profile.eventPlacements ?? [])
+        }
+        if matchIssue == nil {
+            ProfileMatchesCard(matches: matches, emptyTitle: "No recent team matches")
         }
     }
 }
@@ -613,11 +661,11 @@ private struct TeamProfileHeader: View {
             ProfileImage(url: logo, symbol: "person.2.fill", size: 92)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(name).font(.title.bold())
-                if let tag = tag.nonEmpty { Text(tag).font(.headline).foregroundStyle(.secondary) }
+                if let tag = tag.nilIfBlank { Text(tag).font(.headline).foregroundStyle(.secondary) }
             }
             .multilineTextAlignment(.center)
-            if let country = country.nonEmpty { Text(country).foregroundStyle(.secondary) }
-            if let description = description.nonEmpty {
+            if let country = country.nilIfBlank { Text(country).foregroundStyle(.secondary) }
+            if let description = description.nilIfBlank {
                 Text(description).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
         }
@@ -636,24 +684,24 @@ private struct PlayerProfileHeader: View {
         VStack(spacing: 12) {
             ProfileImage(url: profile?.avatar, symbol: "person.crop.circle.fill", size: 96)
             Text(profile?.name ?? fallbackName).font(.title.bold()).italic()
-            if let realName = profile?.realName.nonEmpty {
+            if let realName = profile?.realName.nilIfBlank {
                 Text(realName).font(.headline).foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
-                if let country = profile?.country.nonEmpty {
+                if let country = profile?.country.nilIfBlank {
                     Label(country.uppercased(), systemImage: "globe")
                 }
-                if let team = profile?.currentTeam?.name.nonEmpty {
+                if let team = profile?.currentTeam?.name.nilIfBlank {
                     Label(team, systemImage: "person.2.fill")
                 }
             }
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
-            if let joined = profile?.currentTeam?.joined.nonEmpty {
+            if let joined = profile?.currentTeam?.joined.nilIfBlank {
                 Text(joined).font(.caption).foregroundStyle(.secondary)
             }
-            if let winnings = profile?.totalWinnings.nonEmpty {
+            if let winnings = profile?.totalWinnings.nilIfBlank {
                 Label("Career winnings \(winnings)", systemImage: "trophy.fill")
                     .font(.subheadline.weight(.semibold))
             }
@@ -678,11 +726,11 @@ private struct TeamSnapshotCard: View {
     }
 
     @ViewBuilder private var metrics: some View {
-        if let rank = profile.rating?.rank.nonEmpty { ProfileMetric(label: "Rank", value: rank) }
-        if let rating = profile.rating?.rating.nonEmpty { ProfileMetric(label: "Rating", value: rating) }
-        if let peak = profile.rating?.peakRating.nonEmpty { ProfileMetric(label: "Peak", value: peak) }
-        if let streak = profile.rating?.streak.nonEmpty { ProfileMetric(label: "Form", value: streak) }
-        if let winnings = profile.totalWinnings.nonEmpty { ProfileMetric(label: "Winnings", value: winnings) }
+        if let rank = profile.rating?.rank.nilIfBlank { ProfileMetric(label: "Rank", value: rank) }
+        if let rating = profile.rating?.rating.nilIfBlank { ProfileMetric(label: "Rating", value: rating) }
+        if let peak = profile.rating?.peakRating.nilIfBlank { ProfileMetric(label: "Peak", value: peak) }
+        if let streak = profile.rating?.streak.nilIfBlank { ProfileMetric(label: "Form", value: streak) }
+        if let winnings = profile.totalWinnings.nilIfBlank { ProfileMetric(label: "Winnings", value: winnings) }
     }
 }
 
@@ -695,26 +743,18 @@ private struct TeamRosterCard: View {
                 ProfileEmptyState(title: "Roster unavailable", symbol: "person.3")
             } else {
                 ForEach(members, id: \.identityKey) { member in
-                    if let id = member.id.flatMap(Int.init), member.isStaff != true {
-                        NavigationLink {
-                            PlayerProfileView(playerID: id, name: member.alias, source: "team_profile")
-                        } label: {
-                            RosterRow(member: member, showsDisclosure: true)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("Opens player profile")
-                    } else {
-                        RosterRow(member: member, showsDisclosure: false)
-                    }
+                    TeamRosterMemberLink(member: member)
                 }
             }
         }
     }
 }
 
-private struct RosterRow: View {
+struct RosterRow: View {
     let member: V2TeamRosterMember
     let showsDisclosure: Bool
+    /// An extra caption line, e.g. when a former player joined and left.
+    var detail: String?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -722,15 +762,22 @@ private struct RosterRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(member.alias).font(.body.weight(.semibold))
-                    if member.isCaptain == true { Image(systemName: "star.fill").foregroundStyle(.yellow) }
+                    if member.isCaptain == true {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(.yellow)
+                            .accessibilityLabel("Captain")
+                    }
                 }
-                Text([member.realName.nonEmpty, member.role.nonEmpty, member.isStaff == true ? "Staff" : nil]
+                Text([member.realName.nilIfBlank, member.role.nilIfBlank, member.isStaff == true ? "Staff" : nil]
                     .compactMap { $0 }.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let detail = detail.nilIfBlank {
+                    Text(detail).font(.caption2).foregroundStyle(.tertiary)
+                }
             }
             Spacer()
-            if let country = member.country.nonEmpty { Text(country.uppercased()).font(.caption2.bold()).foregroundStyle(.secondary) }
+            if let country = member.country.nilIfBlank { Text(country.uppercased()).font(.caption2.bold()).foregroundStyle(.secondary) }
             if showsDisclosure { Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary) }
         }
         .frame(minHeight: 52)
@@ -752,7 +799,7 @@ private struct PlayerAgentCard: View {
                         HStack {
                             Text(stat.agent).font(.headline)
                             Spacer()
-                            if let usage = stat.usagePercent.nonEmpty { Text(usage).foregroundStyle(.secondary) }
+                            if let usage = stat.usagePercent.nilIfBlank { Text(usage).foregroundStyle(.secondary) }
                         }
                         ViewThatFits(in: .horizontal) {
                             HStack(spacing: 8) { metrics(for: stat) }
@@ -768,10 +815,10 @@ private struct PlayerAgentCard: View {
 
     @ViewBuilder
     private func metrics(for stat: V2PlayerAgentStat) -> some View {
-        if let rating = stat.rating.nonEmpty { ProfileMetric(label: "Rating", value: rating) }
-        if let acs = stat.averageCombatScore.nonEmpty { ProfileMetric(label: "ACS", value: acs) }
-        if let kd = stat.killDeathRatio.nonEmpty { ProfileMetric(label: "K/D", value: kd) }
-        if let adr = stat.averageDamagePerRound.nonEmpty { ProfileMetric(label: "ADR", value: adr) }
+        if let rating = stat.rating.nilIfBlank { ProfileMetric(label: "Rating", value: rating) }
+        if let acs = stat.averageCombatScore.nilIfBlank { ProfileMetric(label: "ACS", value: acs) }
+        if let kd = stat.killDeathRatio.nilIfBlank { ProfileMetric(label: "K/D", value: kd) }
+        if let adr = stat.averageDamagePerRound.nilIfBlank { ProfileMetric(label: "ADR", value: adr) }
     }
 }
 
@@ -787,15 +834,15 @@ private struct PlacementCard: View {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(placement.event).font(.subheadline.weight(.semibold))
-                            Text([placement.series.nonEmpty, placement.team.nonEmpty, placement.date.nonEmpty]
+                            Text([placement.series.nilIfBlank, placement.team.nilIfBlank, placement.date.nilIfBlank]
                                 .compactMap { $0 }.joined(separator: " · "))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(placement.placement.nonEmpty ?? "–").font(.headline)
-                            if let prize = placement.prize.nonEmpty {
+                            Text(placement.placement.nilIfBlank ?? "–").font(.headline)
+                            if let prize = placement.prize.nilIfBlank {
                                 Text(prize).font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -842,15 +889,15 @@ private struct ProfileMatchRow: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(match.team1.name) vs \(match.team2.name)").font(.subheadline.weight(.semibold))
-                Text([match.event.nonEmpty, match.date.nonEmpty, match.time.nonEmpty]
+                Text([match.event.nilIfBlank, match.date.nilIfBlank, match.time.nilIfBlank]
                     .compactMap { $0 }.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
-                Text(match.score.nonEmpty ?? "–").font(.headline.monospacedDigit())
-                if let result = match.result.nonEmpty {
+                Text(match.score.nilIfBlank ?? "–").font(.headline.monospacedDigit())
+                if let result = match.result.nilIfBlank {
                     Text(result.uppercased())
                         .font(.caption2.bold())
                         .foregroundStyle(result.lowercased() == "win" ? Color.green : Color.primary.opacity(0.6))
@@ -864,7 +911,7 @@ private struct ProfileMatchRow: View {
     }
 }
 
-private struct ProfileCard<Content: View>: View {
+struct ProfileCard<Content: View>: View {
     let title: String
     let symbol: String
     @ViewBuilder let content: Content
@@ -880,7 +927,7 @@ private struct ProfileCard<Content: View>: View {
     }
 }
 
-private struct ProfileMetric: View {
+struct ProfileMetric: View {
     let label: String
     let value: String
 
@@ -896,7 +943,7 @@ private struct ProfileMetric: View {
     }
 }
 
-private struct ProfileImage: View {
+struct ProfileImage: View {
     let url: String?
     let symbol: String
     let size: CGFloat
@@ -912,7 +959,7 @@ private struct ProfileImage: View {
     }
 }
 
-private struct ProfileIssueBanner: View {
+struct ProfileIssueBanner: View {
     let text: String
 
     var body: some View {
@@ -926,7 +973,7 @@ private struct ProfileIssueBanner: View {
     }
 }
 
-private struct ProfileEmptyState: View {
+struct ProfileEmptyState: View {
     let title: String
     let symbol: String
 
@@ -938,7 +985,7 @@ private struct ProfileEmptyState: View {
     }
 }
 
-private struct ProfileFailureView: View {
+struct ProfileFailureView: View {
     let title: String
     let message: String
     let retryable: Bool
@@ -982,7 +1029,7 @@ private func externalLink(
     }
 }
 
-private extension View {
+extension View {
     func profileSurface(cornerRadius: CGFloat) -> some View {
         background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
@@ -992,19 +1039,12 @@ private extension View {
     }
 }
 
-private extension Optional where Wrapped == String {
-    var nonEmpty: String? {
-        guard let value = self?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
-        return value
-    }
-}
-
 private extension V2TeamProfile {
     var hasSnapshot: Bool {
-        rating?.rank.nonEmpty != nil
-            || rating?.rating.nonEmpty != nil
-            || rating?.peakRating.nonEmpty != nil
-            || rating?.streak.nonEmpty != nil
-            || totalWinnings.nonEmpty != nil
+        rating?.rank.nilIfBlank != nil
+            || rating?.rating.nilIfBlank != nil
+            || rating?.peakRating.nilIfBlank != nil
+            || rating?.streak.nilIfBlank != nil
+            || totalWinnings.nilIfBlank != nil
     }
 }

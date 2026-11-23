@@ -320,6 +320,50 @@ func countryFlag(_ code: String?) -> String? {
     return String(String.UnicodeScalarView(scalars))
 }
 
+/// Team logos a screen already has, such as an event's team list, so match rows can
+/// show them without asking the API for each match.
+struct TeamLogoDirectory: Equatable, Sendable {
+    private var byID: [Int: V3Image] = [:]
+    private var byName: [String: V3Image] = [:]
+
+    init(teams: [V3TeamRef] = []) {
+        for team in teams {
+            add(team)
+        }
+    }
+
+    var isEmpty: Bool { byID.isEmpty && byName.isEmpty }
+
+    mutating func add(_ team: V3TeamRef) {
+        guard team.image.preferred(for: .light) != nil else { return }
+        if let id = team.id, byID[id] == nil {
+            byID[id] = team.image
+        }
+        let name = Self.nameKey(team.name)
+        if !name.isEmpty, byName[name] == nil {
+            byName[name] = team.image
+        }
+    }
+
+    /// The logo for `team`, matched by team ID first, then by case-insensitive name.
+    func image(for team: V3TeamRef?) -> V3Image? {
+        guard let team else { return nil }
+        if let id = team.id, let image = byID[id] {
+            return image
+        }
+        return byName[Self.nameKey(team.name)]
+    }
+
+    private static func nameKey(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var teamLogoDirectory = TeamLogoDirectory()
+}
+
 struct MatchTeamLogo: View {
     let team: V3TeamRef?
     let matchID: Int?
@@ -327,11 +371,13 @@ struct MatchTeamLogo: View {
     let size: CGFloat
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.teamLogoDirectory) private var logoDirectory
     @State private var hydratedTeam: V3TeamRef?
 
     private var logo: String? {
         hydratedTeam?.image.preferred(for: colorScheme)
             ?? team?.image.preferred(for: colorScheme)
+            ?? logoDirectory.image(for: team)?.preferred(for: colorScheme)
     }
 
     var body: some View {
@@ -364,12 +410,14 @@ struct MatchTeamLogo: View {
         "\(matchID ?? -1)|\(team?.name ?? "")|\(logo ?? "")"
     }
 
+    /// Falls back to the match page for a logo no list had. Runs when the row appears,
+    /// and asks for the light detail, which costs one vlr.gg request instead of up to 11.
     @MainActor
     private func hydrateMissingLogo() async {
         guard VLRAPI.imageURL(from: logo) == nil, let matchID, !isPlaceholderTeam else { return }
 
         do {
-            let result = try await V3MatchDetailRepository.shared.detail(id: matchID)
+            let result = try await V3MatchDetailRepository.shared.detail(id: matchID, light: true)
             try Task.checkCancellation()
 
             let matchingTeam = result.detail.teams.first { detailTeam in

@@ -3,7 +3,7 @@ Scraper for the vlr.gg match "logs" tab — the 2D replay (``tab=logs``).
 
 Every round of the selected game embeds its replay as JSON in
 ``div.lg-map[data-map]``: the attacking team, a player roster, and one entry per
-kill / spike plant / spike defuse carrying each player's position and health.
+kill / spike plant / spike defuse carrying each player's position and facing.
 The surrounding DOM adds what the JSON omits: the round result, the per-player
 buy (credits, weapon, armour) and the damage source of each kill.
 
@@ -15,8 +15,14 @@ import json
 import logging
 import re
 
+from utils.cache_headers import cap_edge_ttl
 from utils.cache_manager import cache_manager
-from utils.constants import CACHE_TTL_MATCH_DETAIL, MATCH_DETAIL_TAB_FETCH_TIMEOUT, VLR_BASE_URL
+from utils.constants import (
+    CACHE_TTL_MATCH_DETAIL,
+    CACHE_TTL_MATCH_DETAIL_LIVE,
+    MATCH_DETAIL_TAB_FETCH_TIMEOUT,
+    VLR_BASE_URL,
+)
 from utils.error_handling import handle_scraper_errors, upstream_error_payload
 from utils.html_parsers import HTMLParser, extract_text_content, parse_html
 from utils.http_client import fetch_with_retries, get_http_client
@@ -29,6 +35,10 @@ _ARMOR = {
     "heavy armor": "heavy",
     "regen shield": "regen",
 }
+
+# Shortest first: a replay that may still grow (empty, or the map not over yet)
+# is cached briefly; a finished map's replay for the usual match-detail TTL.
+_LOGS_TTLS = (CACHE_TTL_MATCH_DETAIL_LIVE, CACHE_TTL_MATCH_DETAIL)
 
 _SPIKE_SITE = re.compile(r"Spike (?:planted|defused)\s+([A-C])", re.IGNORECASE)
 
@@ -219,6 +229,11 @@ def _parse_events(payload: dict, roster: dict[int, dict], feed: dict[int, dict])
                     "team": player["team"] if player else None,
                     "x": entry[1],
                     "y": entry[2],
+                    # The 4th value is the player's view direction in degrees
+                    # (0-359), not health.
+                    "facing": entry[3],
+                    # Deprecated: misnamed alias of "facing", kept so existing
+                    # clients keep decoding. Do not use; will be removed.
                     "hp": entry[3],
                 }
             )
@@ -244,6 +259,23 @@ def _parse_round(round_el, reasons: dict[str, str]) -> dict:
         "economy": _parse_economy(round_el),
         "events": _parse_events(payload, roster, _parse_feed(round_el)),
     }
+
+
+def _replay_may_grow(html: HTMLParser, rounds: list[dict]) -> bool:
+    """True while the game's replay can still change: no rounds yet, or map not over.
+
+    The map is over once the last round's score is decisive (13+ with a
+    two-round lead) or the match header reports the match as final.
+    """
+    if not rounds:
+        return True
+    scores = list((rounds[-1].get("score") or {}).values())
+    if len(scores) == 2:
+        high, low = max(scores), min(scores)
+        if high >= 13 and high - low >= 2:
+            return False
+    note = html.css_first(".match-header-vs-note")
+    return not (note is not None and "final" in extract_text_content(note).lower())
 
 
 def parse_logs(html: HTMLParser) -> dict:
@@ -279,36 +311,72 @@ async def vlr_match_logs(match_id: str, game_id: str | None = None) -> dict:
         result, per-player buy and replay events. A game without replay data (for
         example a map that was never played) returns an empty ``rounds`` list.
     """
-    cache_key = (match_id, game_id or "")
-    cached = cache_manager.get(CACHE_TTL_MATCH_DETAIL, "match_logs", *cache_key)
+    cache_key = ("match_logs", match_id, game_id or "")
+
+    def cached_logs():
+        for ttl in _LOGS_TTLS:
+            cached = cache_manager.get(ttl, *cache_key)
+            if cached is not None:
+                return cached
+        return None
+
+    def respond(result):
+        # Edge lifetime follows the in-process one (30 s while the replay can
+        # still grow); a stale fallback has already capped it further.
+        ttl = cache_manager.cached_ttl(result, _LOGS_TTLS, *cache_key)
+        if ttl is not None and ttl < CACHE_TTL_MATCH_DETAIL:
+            cap_edge_ttl(ttl)
+        return result
+
+    cached = cached_logs()
     if cached is not None:
-        return cached
+        return respond(cached)
 
-    client = get_http_client()
+    async def build():
+        cached = cached_logs()
+        if cached is not None:
+            return cached
 
-    if game_id is None:
-        base_resp = await fetch_with_retries(f"{VLR_BASE_URL}/{match_id}/", client=client)
-        if base_resp.status_code >= 400:
-            return upstream_error_payload(base_resp.status_code, f"match {match_id}")
-        game_id = _first_played_game_id(parse_html(base_resp.text))
-        if game_id is None:
-            return {"data": {"status": base_resp.status_code, "segments": []}}
+        client = get_http_client()
+        resolved_game_id = game_id
 
-    tab_url = f"{VLR_BASE_URL}/{match_id}/?game={game_id}&tab=logs"
-    tab_resp = await fetch_with_retries(
-        tab_url, client=client, timeout=MATCH_DETAIL_TAB_FETCH_TIMEOUT
+        if resolved_game_id is None:
+            base_resp = await fetch_with_retries(f"{VLR_BASE_URL}/{match_id}/", client=client)
+            if base_resp.status_code >= 400:
+                return upstream_error_payload(base_resp.status_code, f"match {match_id}")
+            resolved_game_id = _first_played_game_id(parse_html(base_resp.text))
+            if resolved_game_id is None:
+                data = {"data": {"status": base_resp.status_code, "segments": []}}
+                cache_manager.set_if_cacheable(CACHE_TTL_MATCH_DETAIL_LIVE, data, *cache_key)
+                return data
+
+        tab_url = f"{VLR_BASE_URL}/{match_id}/?game={resolved_game_id}&tab=logs"
+        tab_resp = await fetch_with_retries(
+            tab_url, client=client, timeout=MATCH_DETAIL_TAB_FETCH_TIMEOUT
+        )
+        if tab_resp.status_code >= 400:
+            return upstream_error_payload(tab_resp.status_code, f"match logs {match_id}")
+
+        html = parse_html(tab_resp.text)
+        parsed = parse_logs(html)
+        segment = {
+            "match_id": match_id,
+            "game_id": resolved_game_id,
+            "map": parsed["map"],
+            "teams": parsed["teams"],
+            "rounds": parsed["rounds"],
+        }
+        data = {"data": {"status": tab_resp.status_code, "segments": [segment]}}
+        ttl = (
+            CACHE_TTL_MATCH_DETAIL_LIVE
+            if _replay_may_grow(html, parsed["rounds"])
+            else CACHE_TTL_MATCH_DETAIL
+        )
+        cache_manager.set_if_cacheable(ttl, data, *cache_key)
+        return data
+
+    result = await cache_manager.with_stale_fallback(
+        lambda: cache_manager.coalesce_async(f"match_logs:{match_id}:{game_id or ''}", build),
+        *cache_key,
     )
-    if tab_resp.status_code >= 400:
-        return upstream_error_payload(tab_resp.status_code, f"match logs {match_id}")
-
-    parsed = parse_logs(parse_html(tab_resp.text))
-    segment = {
-        "match_id": match_id,
-        "game_id": game_id,
-        "map": parsed["map"],
-        "teams": parsed["teams"],
-        "rounds": parsed["rounds"],
-    }
-    data = {"data": {"status": tab_resp.status_code, "segments": [segment]}}
-    cache_manager.set(CACHE_TTL_MATCH_DETAIL, data, "match_logs", *cache_key)
-    return data
+    return respond(result)

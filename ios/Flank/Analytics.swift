@@ -9,6 +9,7 @@ enum AnalyticsContentType: String {
     case team
     case player
     case article
+    case event
 }
 
 enum AnalyticsErrorCategory: String {

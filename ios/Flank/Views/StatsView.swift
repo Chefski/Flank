@@ -7,16 +7,26 @@
 
 import SwiftUI
 
+/// The Players board of the Rankings tab: VLR.GG player stats by region and period.
+/// It has no navigation stack of its own; `RankingsHubView` hosts it.
 struct StatsView: View {
+    private static let scrollTopID = "player-stats-scroll-top"
+
     @StateObject var statsVM = ShowStats()
     @State private var selectedRegion: String = "All"
     @State private var selectedTimeRange: String = "30 days"
     @State private var retryToken = 0
     let regions = ["All", "Americas", "EMEA", "Pacific", "China", "International"]
     let timeRanges = ["30 days", "60 days", "90 days", "all-time"]
-    
+
+    let scrollToTopTrigger: Int
+
+    init(scrollToTopTrigger: Int = 0) {
+        self.scrollToTopTrigger = scrollToTopTrigger
+    }
+
     var body: some View {
-        NavigationStack {
+        ScrollViewReader { scrollProxy in
             ZStack {
                 VStack {
                     LinearGradient(
@@ -31,6 +41,10 @@ struct StatsView: View {
                 
                 ScrollView(showsIndicators: false) {
                     VStack() {
+                        Color.clear
+                            .frame(height: 0)
+                            .id(Self.scrollTopID)
+
                         GlassEffectContainer(spacing: 10) {
                             HStack(spacing: 10) {
                                 Menu {
@@ -103,7 +117,11 @@ struct StatsView: View {
                     await fetchStats()
                 }
             }
-            .navigationBarTitle("Stats")
+            .onChange(of: scrollToTopTrigger) {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    scrollProxy.scrollTo(Self.scrollTopID, anchor: .top)
+                }
+            }
         }
         .task(id: "\(selectedRegion)|\(selectedTimeRange)|\(retryToken)") {
             await fetchStats()
@@ -178,5 +196,8 @@ struct StatsView: View {
 }
 
 #Preview {
-    StatsView()
+    NavigationStack {
+        StatsView()
+            .navigationTitle("Rankings")
+    }
 }

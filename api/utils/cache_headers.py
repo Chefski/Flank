@@ -25,14 +25,24 @@ What never gets a shared-cache lifetime:
   an empty body against the URL.
 
 Match detail is the one route whose TTL depends on the payload: a live match
-uses ``CACHE_TTL_MATCH_DETAIL_LIVE`` (the scraper's own split), read from the
+uses ``CACHE_TTL_MATCH_DETAIL_LIVE`` and a finished one
+``CACHE_TTL_MATCH_DETAIL_FINAL`` (the scraper's own split), read from the
 ``status`` field of the response.
+
+Any code running for a request (a scraper, the cache manager, a router) can
+lower the edge lifetime of that one response with ``cap_edge_ttl(seconds)``
+and flag it as stale with ``mark_stale()``. The middleware sets a ContextVar
+to a fresh dict per request before calling the app; context copies made for
+child tasks (``BaseHTTPMiddleware``, ``asyncio.create_task``) share that same
+dict object, so writes from anywhere below are visible when the response
+starts. A stale response also carries ``X-Data-Stale: 1``.
 
 Registered between CORS and the rate limiter so it sees the limiter's 429s
 and the conditional layer's 304s (see ``main.py``).
 """
 
 import json
+from contextvars import ContextVar
 from urllib.parse import parse_qs
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -46,6 +56,7 @@ from utils.constants import (
     CACHE_TTL_EVENTS,
     CACHE_TTL_LIVE,
     CACHE_TTL_MATCH_DETAIL,
+    CACHE_TTL_MATCH_DETAIL_FINAL,
     CACHE_TTL_MATCH_DETAIL_LIVE,
     CACHE_TTL_NEWS,
     CACHE_TTL_NEWS_ARTICLE,
@@ -77,6 +88,28 @@ PRIVATE_REVALIDATE = "private, max-age=0, must-revalidate"
 # lists do this while team logos are still being fetched).
 EDGE_TTL_CAP_STATE = "edge_ttl_cap"
 NO_STORE = "no-store"
+STALE_HEADER = b"x-data-stale"
+
+# Per-request edge hints: {"cap": int seconds, "stale": bool}. None outside a
+# request handled by CacheControlMiddleware, where the helpers do nothing.
+_edge_hints: ContextVar[dict | None] = ContextVar("edge_hints", default=None)
+
+
+def cap_edge_ttl(seconds: int | float) -> None:
+    """Lower the shared-cache lifetime of the current response to ``seconds``."""
+    hints = _edge_hints.get()
+    if hints is None:
+        return
+    seconds = max(1, int(seconds))
+    current = hints.get("cap")
+    hints["cap"] = seconds if current is None else min(current, seconds)
+
+
+def mark_stale() -> None:
+    """Flag the current response as a last-good payload served after a failed refresh."""
+    hints = _edge_hints.get()
+    if hints is not None:
+        hints["stale"] = True
 
 _MATCH_LIST_TTLS = {
     "live_score": CACHE_TTL_LIVE,
@@ -240,11 +273,13 @@ def _embedded_error(payload) -> bool:
 
 
 def _match_detail_ttl(payload) -> int:
-    return (
-        CACHE_TTL_MATCH_DETAIL_LIVE
-        if "live" in _payload_status(payload)
-        else CACHE_TTL_MATCH_DETAIL
-    )
+    status = _payload_status(payload)
+    if "live" in status:
+        return CACHE_TTL_MATCH_DETAIL_LIVE
+    # V3 normalises vlr.gg's "final" to "completed".
+    if status in ("final", "completed"):
+        return CACHE_TTL_MATCH_DETAIL_FINAL
+    return CACHE_TTL_MATCH_DETAIL
 
 
 def _set_header(headers: list[tuple[bytes, bytes]], name: bytes, value: str) -> list:
@@ -278,10 +313,19 @@ class CacheControlMiddleware:
 
         # Shared with the route via request.state (Starlette stores it here).
         state = scope.setdefault("state", {})
+        hints: dict = {}
+        token = _edge_hints.set(hints)
 
         def capped(value: int) -> int:
-            cap = state.get(EDGE_TTL_CAP_STATE)
-            return min(value, cap) if isinstance(cap, int) and cap > 0 else value
+            for cap in (state.get(EDGE_TTL_CAP_STATE), hints.get("cap")):
+                if isinstance(cap, int) and not isinstance(cap, bool) and cap > 0:
+                    value = min(value, cap)
+            return value
+
+        def with_stale(headers: list) -> list:
+            if hints.get("stale"):
+                return _set_header(headers, STALE_HEADER, "1")
+            return headers
 
         start: Message | None = None
         chunks: list[bytes] = []
@@ -305,6 +349,8 @@ class CacheControlMiddleware:
                     headers = _set_header(
                         headers, b"cache-control", shared_cache_control(capped(ttl))
                     )
+                if 200 <= status < 300:
+                    headers = with_stale(headers)
                 await send({**message, "headers": headers})
                 return
 
@@ -317,10 +363,14 @@ class CacheControlMiddleware:
                 return
 
             body = b"".join(chunks)
-            await send(self._finalise(start, body, ttl, capped))
+            final = self._finalise(start, body, ttl, capped)
+            await send({**final, "headers": with_stale(final["headers"])})
             await send({"type": "http.response.body", "body": body, "more_body": False})
 
-        await self.app(scope, receive, wrapped_send)
+        try:
+            await self.app(scope, receive, wrapped_send)
+        finally:
+            _edge_hints.reset(token)
 
     @staticmethod
     def _finalise(start: Message, body: bytes, ttl: int, capped) -> Message:
