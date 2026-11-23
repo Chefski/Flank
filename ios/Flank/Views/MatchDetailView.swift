@@ -125,6 +125,7 @@ struct MatchDetailView: View {
     @State private var showingCalendarAlert = false
     @State private var calendarAlertMessage = ""
     @State private var hasTrackedOpen = false
+    @Namespace private var sectionNamespace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let summary: V3Match?
@@ -245,7 +246,7 @@ struct MatchDetailView: View {
 
     private func loadedContent(detail: V3MatchDetail, isStale: Bool) -> some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
+            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                 MatchHeroView(
                     status: detail.status,
                     startsAt: detail.startsAt,
@@ -255,41 +256,43 @@ struct MatchDetailView: View {
                     format: detail.format
                 )
 
-                sectionPicker(for: detail)
+                SwiftUI.Section {
+                    VStack(spacing: 16) {
+                        if isStale {
+                            Label(
+                                "Showing a cached copy. Pull to retry when you’re online.",
+                                systemImage: "icloud.slash"
+                            )
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(.thinMaterial, in: .rect(cornerRadius: 16, style: .continuous))
+                            .accessibilityLabel("Offline. Showing cached match details.")
+                        }
 
-                VStack(spacing: 16) {
-                    if isStale {
-                        Label(
-                            "Showing a cached copy. Pull to retry when you’re online.",
-                            systemImage: "icloud.slash"
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                        .accessibilityLabel("Offline. Showing cached match details.")
+                        switch selectedSection {
+                        case .overview:
+                            overview(detail)
+                        case .maps:
+                            maps(detail)
+                        case .stats:
+                            stats(detail)
+                        case .rounds:
+                            rounds(detail)
+                        case .economy:
+                            economy(detail)
+                        case .history:
+                            history(detail)
+                        }
                     }
-
-                    switch selectedSection {
-                    case .overview:
-                        overview(detail)
-                    case .maps:
-                        maps(detail)
-                    case .stats:
-                        stats(detail)
-                    case .rounds:
-                        rounds(detail)
-                    case .economy:
-                        economy(detail)
-                    case .history:
-                        history(detail)
-                    }
+                    .id(selectedSection)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+                    .padding(.bottom, 24)
+                } header: {
+                    sectionPicker(for: detail)
                 }
-                .id(selectedSection)
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-                .padding(.bottom, 24)
             }
         }
         .refreshable { await viewModel.load(forceRefresh: true) }
@@ -325,40 +328,49 @@ struct MatchDetailView: View {
             sectionButtons(for: detail)
         }
         .contentMargins(.horizontal, 16, for: .scrollContent)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        // Opaque so content scrolling under the pinned chips doesn't show through.
         .background(Color(uiColor: .systemGroupedBackground))
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Match detail section")
     }
 
     private func sectionButtons(for detail: V3MatchDetail) -> some View {
-        HStack(spacing: 24) {
+        HStack(spacing: 8) {
             ForEach(availableSections(for: detail)) { section in
+                let isSelected = selectedSection == section
                 Button {
+                    guard !isSelected else { return }
                     if reduceMotion {
                         selectedSection = section
                     } else {
-                        withAnimation(.snappy) { selectedSection = section }
+                        withAnimation(.snappy(duration: 0.3)) { selectedSection = section }
                     }
                 } label: {
                     Text(section.rawValue)
-                        .font(.subheadline.weight(selectedSection == section ? .bold : .medium))
-                        .foregroundStyle(selectedSection == section ? .primary : .secondary)
-                        .padding(.top, 16)
-                        .padding(.bottom, 13)
-                        .overlay(alignment: .bottom) {
-                            Capsule()
-                                .fill(selectedSection == section ? Color.orange : .clear)
-                                .frame(height: 3)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isSelected ? Color(uiColor: .systemBackground) : .primary)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 36)
+                        .background {
+                            if isSelected {
+                                Capsule()
+                                    .fill(.primary)
+                                    .matchedGeometryEffect(id: "selectedSection", in: sectionNamespace)
+                            } else {
+                                Capsule()
+                                    .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                            }
                         }
+                        .frame(minHeight: 44)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .accessibilityAddTraits(selectedSection == section ? .isSelected : [])
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
+        .sensoryFeedback(.selection, trigger: selectedSection)
     }
 
     @ViewBuilder
@@ -374,6 +386,7 @@ struct MatchDetailView: View {
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
                 .tint(.orange)
                 .accessibilityHint("Adds this match using its exact scheduled time")
             }
@@ -628,7 +641,7 @@ struct MatchDetailView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(.thinMaterial, in: Capsule())
+                    .background(.insetFill, in: Capsule())
                     .accessibilityLabel("\(streams.count) streams")
             }
             .frame(minHeight: 44)
@@ -690,7 +703,7 @@ struct MatchDetailView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(.thinMaterial, in: Capsule())
+                    .background(.insetFill, in: Capsule())
                     .accessibilityLabel("\(vods.count) videos")
             }
             .frame(minHeight: 44)
@@ -785,18 +798,22 @@ private struct MatchDetailCard<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label(title, systemImage: symbol)
-                .font(.title3.weight(.bold))
-                .accessibilityAddTraits(.isHeader)
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: symbol)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.headline)
+            .accessibilityAddTraits(.isHeader)
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(.primary.opacity(0.1), lineWidth: 1)
-        }
+        .padding(18)
+        .background(
+            Color(uiColor: .secondarySystemGroupedBackground),
+            in: .rect(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous)
+        )
     }
 }
 
@@ -815,6 +832,7 @@ private struct MatchHeroView: View {
 
     @State private var leadingColor: Color
     @State private var trailingColor: Color
+    @ScaledMetric(relativeTo: .largeTitle) private var scoreSize: CGFloat = 46
 
     init(
         status: V3MatchStatus,
@@ -851,85 +869,45 @@ private struct MatchHeroView: View {
     }
 
     var body: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 22) {
+            header
+
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 14) {
-                    team(teams.first, color: leadingColor)
+                HStack(alignment: .center, spacing: 10) {
+                    team(teams.first, position: 0)
                     scoreSummary
-                    team(teams.dropFirst().first, color: trailingColor)
+                    team(teams.dropFirst().first, position: 1)
                 }
 
-                VStack(spacing: 16) {
+                VStack(spacing: 18) {
                     scoreSummary
-                    HStack(alignment: .top, spacing: 20) {
-                        team(teams.first, color: leadingColor)
-                        team(teams.dropFirst().first, color: trailingColor)
+                    HStack(alignment: .top, spacing: 16) {
+                        team(teams.first, position: 0)
+                        team(teams.dropFirst().first, position: 1)
                     }
                 }
 
                 VStack(spacing: 18) {
                     scoreSummary
-                    team(teams.first, color: leadingColor)
-                    team(teams.dropFirst().first, color: trailingColor)
+                    team(teams.first, position: 0)
+                    team(teams.dropFirst().first, position: 1)
                 }
             }
-
-            HStack(spacing: 10) {
-                AsyncImage(url: VLRAPI.imageURL(from: event.image.preferred(for: .dark))) { image in
-                    image.resizable().scaledToFit()
-                } placeholder: {
-                    Image(systemName: "trophy.fill")
-                        .foregroundStyle(.white.opacity(0.65))
-                }
-                .frame(width: 28, height: 28)
-                .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(event.name)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
-                    if !eventDetail.isEmpty {
-                        Text(eventDetail)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.72))
-                            .lineLimit(2)
-                    }
-                }
-
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 2)
         }
-        .foregroundStyle(.white)
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 20)
-        .padding(.top, 22)
-        .padding(.bottom, 18)
-        .background {
-            ZStack {
-                Color(red: 0.055, green: 0.055, blue: 0.065)
-
-                FluidGradient(
-                    blobs: [leadingColor, trailingColor],
-                    highlights: [leadingColor, trailingColor, trailingColor, leadingColor],
-                    speed: reduceMotion ? 0 : 0.22,
-                    blur: 0.82
-                )
-                .opacity(0.72)
-
-                LinearGradient(
-                    colors: [.black.opacity(0.08), .black.opacity(0.36)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
+        .padding(.horizontal, 18)
+        .padding(.top, 18)
+        .padding(.bottom, 24)
+        .background { surface }
+        .clipShape(.rect(cornerRadius: Self.cornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
         }
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(.white.opacity(0.12))
-                .frame(height: 1)
-        }
+        // Always dark, like the live card, so the team colours read the same in both appearances.
+        .environment(\.colorScheme, .dark)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Match summary")
         .task(id: "\(firstTeamLogo ?? "")|\(secondTeamLogo ?? "")") {
@@ -955,25 +933,76 @@ private struct MatchHeroView: View {
         }
     }
 
-    private var statusLabel: some View {
-        HStack(spacing: 5) {
-            if status == .live {
-                Circle()
-                    .fill(.white)
-                    .frame(width: 6, height: 6)
-                    .accessibilityHidden(true)
-            }
-            Text(status.displayName.uppercased())
+    private static let cornerRadius: CGFloat = 28
+
+    private var surface: some View {
+        ZStack {
+            Color(red: 0.055, green: 0.055, blue: 0.065)
+
+            FluidGradient(
+                blobs: [leadingColor, trailingColor],
+                highlights: [leadingColor, trailingColor, trailingColor, leadingColor],
+                speed: reduceMotion ? 0 : 0.22,
+                blur: 0.82
+            )
+            .opacity(0.68)
+
+            LinearGradient(
+                colors: [.black.opacity(0), .black.opacity(0.38)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
         }
-        .font(.caption.weight(.black))
-        .foregroundStyle(.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(status == .live ? Color.red.opacity(0.82) : .white.opacity(0.13), in: Capsule())
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            AsyncImage(url: VLRAPI.imageURL(from: event.image.preferred(for: .dark))) { image in
+                image.resizable().scaledToFit()
+            } placeholder: {
+                Image(systemName: "trophy.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(width: 28, height: 28)
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(event.name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                if !eventDetail.isEmpty {
+                    Text(eventDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+
+            Spacer(minLength: 8)
+            statusBadge
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
-    private func team(_ team: V3TeamRef?, color: Color) -> some View {
+    private var statusBadge: some View {
+        if status == .live {
+            LiveBadge()
+        } else {
+            Text(status == .completed ? "Final" : status.displayName)
+                .font(.caption.weight(.semibold))
+                .textCase(.uppercase)
+                .kerning(0.6)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(.white.opacity(0.1), in: Capsule())
+        }
+    }
+
+    @ViewBuilder
+    private func team(_ team: V3TeamRef?, position: Int) -> some View {
         if let team, let teamID = team.id {
             NavigationLink {
                 TeamProfileView(
@@ -983,17 +1012,17 @@ private struct MatchHeroView: View {
                     source: "match_detail"
                 )
             } label: {
-                teamContent(team, color: color)
+                teamContent(team, position: position)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(MatchCardButtonStyle())
             .accessibilityHint("Opens team profile")
         } else {
-            teamContent(team, color: color)
+            teamContent(team, position: position)
         }
     }
 
-    private func teamContent(_ team: V3TeamRef?, color: Color) -> some View {
-        VStack(spacing: 9) {
+    private func teamContent(_ team: V3TeamRef?, position: Int) -> some View {
+        VStack(spacing: 10) {
             AsyncImage(url: VLRAPI.imageURL(from: team?.image.preferred(for: .dark))) { image in
                 image
                     .resizable()
@@ -1002,79 +1031,53 @@ private struct MatchHeroView: View {
                 Image(systemName: "shield.lefthalf.filled")
                     .resizable()
                     .scaledToFit()
-                    .foregroundStyle(.white.opacity(0.72))
-                    .padding(14)
+                    .foregroundStyle(.tertiary)
+                    .padding(12)
             }
-            .frame(width: 72, height: 72)
+            .frame(width: 64, height: 64)
             .accessibilityHidden(true)
 
-            Text(team?.name ?? "Team unavailable")
-                .font(.headline.weight(.bold))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .minimumScaleFactor(0.8)
+            VStack(spacing: 3) {
+                Text(team?.name ?? "TBD")
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
 
-            if let teamLabel = teamLabel(team) {
-                Text(teamLabel)
-                    .font(.caption2.weight(.bold))
-                    .textCase(.uppercase)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(color.opacity(0.5), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .stroke(.white.opacity(0.2), lineWidth: 0.5)
-                    }
-            }
-
-            if showsWinnerOutcome {
-                Text("WINNER")
-                    .font(.caption2.weight(.black))
-                    .tracking(0.9)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(winnerColor, in: Capsule())
-                    .overlay {
-                        Capsule()
-                            .stroke(.white.opacity(0.34), lineWidth: 0.75)
-                    }
-                    .opacity(team?.isWinner == true ? 1 : 0)
-                    .accessibilityHidden(team?.isWinner != true)
+                if let teamLabel = teamLabel(team) {
+                    Text(teamLabel)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
         }
         .frame(maxWidth: .infinity)
+        .opacity(loserPosition == position ? 0.5 : 1)
         .contentShape(.rect)
     }
 
     private var scoreSummary: some View {
-        VStack(spacing: 10) {
-            statusLabel
-
+        VStack(spacing: 6) {
             if teams.first?.score == nil && teams.dropFirst().first?.score == nil {
                 Text("VS")
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .frame(minWidth: 52, minHeight: 52)
-                    .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .font(.system(.title2, design: .rounded, weight: .bold))
+                    .foregroundStyle(.secondary)
             } else {
-                HStack(spacing: 8) {
-                    scoreCell(
-                        teams.first?.score,
-                        isWinner: teams.first?.isWinner == true
-                    )
+                HStack(spacing: 10) {
+                    scoreText(teams.first?.score, position: 0)
                     Text("–")
-                        .font(.title3.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.76))
-                    scoreCell(
-                        teams.dropFirst().first?.score,
-                        isWinner: teams.dropFirst().first?.isWinner == true
-                    )
+                        .foregroundStyle(.tertiary)
+                    scoreText(teams.dropFirst().first?.score, position: 1)
                 }
+                .font(.system(size: scoreSize, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .contentTransition(.numericText())
             }
 
             Text(matchContext)
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.white.opacity(0.72))
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
         }
@@ -1083,26 +1086,19 @@ private struct MatchHeroView: View {
         .accessibilityLabel(heroAccessibilityLabel)
     }
 
-    private func scoreCell(_ value: Int?, isWinner: Bool) -> some View {
+    private func scoreText(_ value: Int?, position: Int) -> some View {
         Text(value.map(String.init) ?? "–")
-            .font(.largeTitle.bold().monospacedDigit())
-            .frame(minWidth: 52, minHeight: 58)
-            .background(
-                isWinner ? winnerColor : .black.opacity(0.24),
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(.white.opacity(isWinner ? 0.38 : 0.14), lineWidth: 1)
-            }
+            .foregroundStyle(loserPosition == position ? .secondary : .primary)
     }
 
-    private var showsWinnerOutcome: Bool {
-        status == .completed && teams.contains(where: \.isWinner)
-    }
-
-    private var winnerColor: Color {
-        Color(red: 0.08, green: 0.48, blue: 0.27)
+    /// The non-winning slot of a completed match, faded back rather than badging the winner.
+    private var loserPosition: Int? {
+        guard status == .completed else { return nil }
+        switch (teams.first?.isWinner == true, teams.dropFirst().first?.isWinner == true) {
+        case (true, false): return 1
+        case (false, true): return 0
+        default: return nil
+        }
     }
 
     private func teamLabel(_ team: V3TeamRef?) -> String? {
@@ -1228,18 +1224,41 @@ private struct MapScoreView: View {
     let teams: [V3TeamRef]
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Text(teams.first?.name ?? "Team 1")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(winner == 2 ? .secondary : .primary)
+                .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(game.score.team1.map(String.init) ?? "–")
-                .font(.title2.bold().monospacedDigit())
-            Text("–")
-                .foregroundStyle(.secondary)
-            Text(game.score.team2.map(String.init) ?? "–")
-                .font(.title2.bold().monospacedDigit())
+
+            HStack(spacing: 8) {
+                Text(game.score.team1.map(String.init) ?? "–")
+                    .foregroundStyle(winner == 2 ? .secondary : .primary)
+                Text("–")
+                    .foregroundStyle(.tertiary)
+                Text(game.score.team2.map(String.init) ?? "–")
+                    .foregroundStyle(winner == 1 ? .secondary : .primary)
+            }
+            .font(.system(.title, design: .rounded, weight: .bold))
+            .monospacedDigit()
+            .fixedSize()
+
             Text(teams.dropFirst().first?.name ?? "Team 2")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(winner == 1 ? .secondary : .primary)
+                .lineLimit(2)
+                .multilineTextAlignment(.trailing)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
+        .padding(.vertical, 4)
+    }
+
+    /// 1 or 2 once a finished map has a higher score on one side.
+    private var winner: Int? {
+        guard game.status == .completed,
+              let first = game.score.team1, let second = game.score.team2,
+              first != second else { return nil }
+        return first > second ? 1 : 2
     }
 }
 
@@ -1251,6 +1270,7 @@ private struct SideScoreGrid: View {
         Grid(horizontalSpacing: 14, verticalSpacing: 7) {
             GridRow {
                 Text("")
+                    .gridColumnAlignment(.leading)
                 Text("ATK")
                 Text("DEF")
                 Text("OT")
@@ -1327,7 +1347,7 @@ private struct PlayerStatsRow: View {
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
+                HStack(spacing: 18) {
                     stat("Rating", player.rating)
                     stat("ACS", player.averageCombatScore, decimals: 0)
                     stat("K / D / A", kda)
@@ -1339,7 +1359,7 @@ private struct PlayerStatsRow: View {
             }
         }
         .padding(12)
-        .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 14))
+        .background(.insetFill, in: .rect(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilitySummary)
     }
@@ -1366,16 +1386,14 @@ private struct PlayerStatsRow: View {
     }
 
     private func stat(_ label: String, _ value: String?) -> some View {
-        VStack(spacing: 2) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.caption2)
+                .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
             Text(value ?? "–")
-                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .font(.system(.subheadline, design: .rounded, weight: .semibold).monospacedDigit())
         }
-        .padding(.horizontal, 10)
-        .frame(minHeight: 44)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .frame(minHeight: 36)
     }
 
     private var accessibilitySummary: String {
@@ -1470,7 +1488,7 @@ private struct RoundRow: View {
             Text(String(round.number))
                 .font(.caption.bold().monospacedDigit())
                 .frame(width: 28, height: 28)
-                .background(.thinMaterial, in: Circle())
+                .background(.insetFill, in: Circle())
             VStack(alignment: .leading, spacing: 2) {
                 Text(winnerName)
                     .font(.subheadline.weight(.semibold))
@@ -1535,7 +1553,7 @@ private struct EconomyRowView: View {
             }
         }
         .padding(12)
-        .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 14))
+        .background(.insetFill, in: .rect(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Economy for \(teamName)")
     }
@@ -1586,6 +1604,11 @@ private struct HistoryRow: View {
             "\(match.teams.map(\.name).joined(separator: " versus ")), score \(match.score.team1.map(String.init) ?? "unavailable") to \(match.score.team2.map(String.init) ?? "unavailable"), \(match.eventName ?? "event unavailable")"
         )
     }
+}
+
+private extension ShapeStyle where Self == Color {
+    /// Fill for rows nested inside a section card.
+    static var insetFill: Color { Color(uiColor: .tertiarySystemGroupedBackground) }
 }
 
 private extension V3GameStatus {
