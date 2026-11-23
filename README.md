@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/iOS-15.0+-blue.svg" alt="iOS 15.0+">
+  <img src="https://img.shields.io/badge/iOS-26.0+-blue.svg" alt="iOS 26.0+">
   <img src="https://img.shields.io/badge/swift-%23FA7343.svg?style=flat&logo=swift&logoColor=white" alt="Swift">
   <img src="https://img.shields.io/badge/swiftui-%2302569B.svg?style=flat&logo=swift&logoColor=white" alt="SwiftUI">
 </p>
@@ -22,10 +22,49 @@
 - 🌙 **Dark Mode Support**: Comfortable viewing experience day and night
 - 📱 **Native iOS Experience**: Built with SwiftUI for smooth performance
 
+## Repository layout
+
+| Path | What it is |
+|------|------------|
+| `ios/` | The SwiftUI app. Open `ios/Flank.xcodeproj`. |
+| `api/` | The VLR.gg data service the app talks to (a fork of [axsddlr/vlrggapi](https://github.com/axsddlr/vlrggapi), MIT). FastAPI, managed with `uv`, deployed to Vercel with `api` as the project root. |
+| `.github/workflows/api-*.yml` | CI for the API. These run only when `api/**` (or the workflow itself) changes. |
+
+Working on the API:
+
+```sh
+cd api
+uv sync
+uv run pytest -q
+uv run python main.py   # serves on http://127.0.0.1:3001
+```
+
+Point a Debug build of the app at the local server with the launch argument
+`-FLANKAPIHost http://127.0.0.1:3001`.
+
+`api/` was squashed in from [Chefski/vlrggapi](https://github.com/Chefski/vlrggapi),
+which keeps its earlier history. Because this repo doesn't share that history,
+upstream fixes are applied as a diff from the last synced upstream commit:
+
+```sh
+# Last synced axsddlr/vlrggapi commit; update it after each sync.
+LAST_SYNC=1cb73ceb8123c89e586a3862eaf544021294dd10
+
+git fetch https://github.com/axsddlr/vlrggapi.git master
+git diff "$LAST_SYNC" FETCH_HEAD -- . ':!.github' | git apply --3way --directory=api
+git rev-parse FETCH_HEAD   # new LAST_SYNC
+```
+
+Upstream workflow changes (`.github/`) are left out; port any you want to the
+`api-*.yml` workflows by hand.
+
+`api/WORKFLOW.md` and the API README describe the API's earlier single-branch
+(`master`) setup; in this repo the API follows the same `dev`/`main` flow as the app.
+
 ## Development and releases
 
 - `dev` is the default branch and the integration point for ongoing work.
-- `main` is the release branch watched by Xcode Cloud.
+- `main` is the release branch: Xcode Cloud builds the app from it, and the API's production deploy and Docker image come from it.
 - To create a new build, update `dev`, then fast-forward `main` to `origin/dev` and push `main`:
 
   ```sh
@@ -53,4 +92,4 @@ Keeping release-only changes out of `main` ensures every Xcode Cloud build corre
 Flank relies on the following amazing resources:
 
 - [VLR.gg](https://vlr.gg) - The premier source for Valorant esports coverage, news, and match data
-- [Flank VLR API](https://flank-vlr-api.vercel.app/) - The v2 API powering Flank's VLR.gg data
+- [Flank VLR API](https://flank-vlr-api.vercel.app/) - The v2 and v3 APIs in `api/` powering Flank's VLR.gg data, built on [vlrggapi](https://github.com/axsddlr/vlrggapi) by Andre Saddler

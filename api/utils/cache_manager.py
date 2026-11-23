@@ -1,0 +1,118 @@
+"""
+In-memory TTL cache manager using cachetools.
+"""
+import asyncio
+import hashlib
+import json
+
+from cachetools import TTLCache
+
+from utils.constants import CACHE_MAX_SIZE
+from utils.id_mapper import id_mapper
+
+
+class CacheManager:
+    """Per-endpoint TTL caches keyed by endpoint + query params."""
+
+    def __init__(self, max_size: int = CACHE_MAX_SIZE):
+        self._max_size = max_size
+        self._caches: dict[str, TTLCache] = {}
+        self._inflight: dict[str, asyncio.Task] = {}
+
+    def _get_cache(self, ttl: int) -> TTLCache:
+        key = str(ttl)
+        if key not in self._caches:
+            self._caches[key] = TTLCache(maxsize=self._max_size, ttl=ttl)
+        return self._caches[key]
+
+    @staticmethod
+    def make_cache_key(*args, **kwargs) -> str:
+        """Deterministic cache key from args and kwargs."""
+        raw = json.dumps({"a": args, "k": kwargs}, sort_keys=True, default=str)
+        return hashlib.md5(raw.encode()).hexdigest()
+
+    def get(self, ttl: int, *args, **kwargs):
+        """Get cached value or None."""
+        cache = self._get_cache(ttl)
+        key = self.make_cache_key(*args, **kwargs)
+        return cache.get(key)
+
+    def set(self, ttl: int, value, *args, **kwargs):
+        """Store a value in the cache."""
+        cache = self._get_cache(ttl)
+        key = self.make_cache_key(*args, **kwargs)
+        cache[key] = value
+
+    @staticmethod
+    def is_cacheable(value) -> bool:
+        """Return True when a response payload is safe to cache."""
+        if not isinstance(value, dict):
+            return True
+
+        payload = value.get("data", value)
+        if not isinstance(payload, dict):
+            return True
+
+        status = payload.get("status")
+        if isinstance(status, int) and status >= 400:
+            return False
+
+        if payload.get("error"):
+            return False
+
+        return True
+
+    def set_if_cacheable(self, ttl: int, value, *args, **kwargs) -> bool:
+        """Store a value only when it does not represent an upstream error."""
+        if not self.is_cacheable(value):
+            return False
+        self.set(ttl, value, *args, **kwargs)
+        return True
+
+    async def coalesce_async(self, key: str, producer):
+        """Share one in-flight async producer across concurrent callers."""
+        task = self._inflight.get(key)
+        if task is None:
+            task = asyncio.create_task(producer())
+            self._inflight[key] = task
+
+        try:
+            return await task
+        finally:
+            if self._inflight.get(key) is task and task.done():
+                self._inflight.pop(key, None)
+
+    async def get_or_create_async(self, ttl: int, producer, *args, **kwargs):
+        """Return cached data or coalesce one producer call per cache key."""
+        cached = self.get(ttl, *args, **kwargs)
+        if cached is not None:
+            return cached
+
+        key = f"{ttl}:{self.make_cache_key(*args, **kwargs)}"
+
+        async def build():
+            cached_value = self.get(ttl, *args, **kwargs)
+            if cached_value is not None:
+                return cached_value
+
+            value = await producer()
+            self.set_if_cacheable(ttl, value, *args, **kwargs)
+            return value
+
+        return await self.coalesce_async(key, build)
+
+    def invalidate(self, ttl: int, *args, **kwargs):
+        """Remove a specific entry."""
+        cache = self._get_cache(ttl)
+        key = self.make_cache_key(*args, **kwargs)
+        cache.pop(key, None)
+
+    def clear_all(self):
+        """Clear all caches and the id mapper."""
+        for cache in self._caches.values():
+            cache.clear()
+        self._inflight.clear()
+        id_mapper.clear()
+
+
+cache_manager = CacheManager()
