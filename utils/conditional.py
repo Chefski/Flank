@@ -8,8 +8,9 @@ response body) and answers a matching ``If-None-Match`` with ``304 Not
 Modified``, letting repeat clients skip the body entirely.
 
 It deliberately owns no cache: the ETag is derived from whatever body the
-application (and its TTL cache) already produced, and no ``Cache-Control``
-header is added. This layer also runs inside ``RateLimitMiddleware`` so a 304
+application (and its TTL cache) already produced. ``Cache-Control`` is set by
+the outer ``utils.cache_headers.CacheControlMiddleware``, which gives a 304
+``private`` so a shared cache never stores the empty body. This layer also runs inside ``RateLimitMiddleware`` so a 304
 still consumes rate-limit budget and still carries the ``X-RateLimit-*``
 headers.
 

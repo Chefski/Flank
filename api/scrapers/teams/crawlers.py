@@ -27,6 +27,7 @@ from utils.constants import (
 from utils.error_handling import handle_scraper_errors
 from utils.html_parsers import add_image_variants, find_elements_by_selectors, parse_html
 from utils.http_client import fetch_theme_variants, fetch_with_retries, get_http_client
+from utils.team_logos import team_logo_store
 
 from .parsers import (
     _normalize_ws,
@@ -130,6 +131,7 @@ async def vlr_team(team_id: str) -> dict:
             header_info,
             _parse_team_header(dark_html, team_id),
         )
+        team_logo_store.record_team({**header_info, "id": header_info.get("id") or team_id})
         rating = _parse_rating_info(html)
         roster = _parse_roster(html)
         event_placements, total_winnings = _parse_event_placements(html)

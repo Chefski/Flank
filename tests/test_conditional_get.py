@@ -12,6 +12,7 @@ from starlette.routing import Route
 
 from api.utils.rate_limiter import RateLimitMiddleware
 from main import app
+from utils.cache_headers import CacheControlMiddleware
 from utils.conditional import ConditionalGetMiddleware, _is_conditional_request
 
 _ETAG_RE = re.compile(r'^"[0-9a-f]{64}"$')
@@ -48,7 +49,8 @@ async def test_rankings_returns_etag_then_304(async_client, monkeypatch):
     assert _ETAG_RE.match(etag)
     # Strong validator: sha256 of the exact body bytes, quoted.
     assert etag == '"' + hashlib.sha256(first.content).hexdigest() + '"'
-    assert "cache-control" not in first.headers
+    # The 200 carries the shared-cache lifetime (utils.cache_headers).
+    assert "s-maxage=3600" in first.headers["cache-control"]
 
     second = await async_client.get(
         "/v2/rankings?region=na", headers={"If-None-Match": etag}
@@ -56,9 +58,10 @@ async def test_rankings_returns_etag_then_304(async_client, monkeypatch):
     assert second.status_code == 304
     assert second.headers["etag"] == etag
     assert second.content == b""
-    # A 304 is a bodiless response: no content-type, no cache-control.
+    # A 304 is a bodiless response: no content-type, and never a shared-cache
+    # lifetime, so a CDN can not store the empty body against the URL.
     assert "content-type" not in second.headers
-    assert "cache-control" not in second.headers
+    assert second.headers["cache-control"] == "private, max-age=0, must-revalidate"
 
 
 @pytest.mark.anyio
@@ -331,7 +334,13 @@ async def test_non_get_methods_are_rejected(method):
 def test_middleware_order_is_cors_rate_limit_conditional_get():
     classes = [middleware.cls for middleware in app.user_middleware]
 
-    assert classes[:3] == [CORSMiddleware, RateLimitMiddleware, ConditionalGetMiddleware]
+    # CacheControl sits between CORS and the limiter so it sees 429s and 304s.
+    assert classes[:4] == [
+        CORSMiddleware,
+        CacheControlMiddleware,
+        RateLimitMiddleware,
+        ConditionalGetMiddleware,
+    ]
 
 
 # ---------------------------------------------------------------------------

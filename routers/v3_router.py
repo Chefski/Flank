@@ -1,7 +1,8 @@
 """Stable, fully typed V3 API routes."""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
+from api.team_logo_enrichment import enrich_match_list_logos
 from api.v3_adapters import (
     adapt_event_detail,
     adapt_event_list,
@@ -36,7 +37,8 @@ from routers.shared_handlers import (
     get_news_data,
     get_stats_data,
 )
-from utils.constants import MAX_MATCH_QUERY_BOUND, MAX_NEWS_PAGE
+from utils.cache_headers import EDGE_TTL_CAP_STATE
+from utils.constants import CACHE_TTL_PARTIAL_LOGOS, MAX_MATCH_QUERY_BOUND, MAX_NEWS_PAGE
 from utils.error_handling import (
     validate_event_query,
     validate_id_param,
@@ -58,6 +60,14 @@ def _unwrap(scraper_result: dict) -> dict:
             detail=data.get("error", "Upstream request failed"),
         )
     return data
+
+
+async def _with_team_logos(request: Request, payload: dict) -> dict:
+    """Fill list logos from the logo index; shorten the edge TTL while gaps remain."""
+    payload, complete = await enrich_match_list_logos(payload)
+    if not complete:
+        setattr(request.state, EDGE_TTL_CAP_STATE, CACHE_TTL_PARTIAL_LOGOS)
+    return payload
 
 
 def _first_segment(payload: dict, resource: str) -> dict:
@@ -146,6 +156,7 @@ async def v3_stats(
     summary="Typed match list",
 )
 async def v3_matches(
+    request: Request,
     q: str = Query(..., description="upcoming, upcoming_extended, live_score, or results"),
     num_pages: int = Query(1, ge=1, le=MAX_MATCH_QUERY_BOUND),
     from_page: int | None = Query(None, ge=1, le=MAX_MATCH_QUERY_BOUND),
@@ -166,7 +177,8 @@ async def v3_matches(
         request_delay,
         timeout,
     )
-    matches, meta = adapt_match_list(_unwrap(result), query=q)
+    payload = await _with_team_logos(request, _unwrap(result))
+    matches, meta = adapt_match_list(payload, query=q)
     return V3Response[list[V3Match], V3MatchListMeta](data=matches, meta=meta)
 
 
@@ -205,11 +217,11 @@ async def v3_events(
     response_model=V3Response[list[V3Match], V3MatchListMeta],
     summary="Typed event matches",
 )
-async def v3_event_matches(event_id: str):
+async def v3_event_matches(request: Request, event_id: str):
     validate_id_param(event_id, "event_id")
     numeric_id = int(event_id)
     matches, meta = adapt_match_list(
-        _unwrap(await get_event_matches_data(event_id)),
+        await _with_team_logos(request, _unwrap(await get_event_matches_data(event_id))),
         query="event",
         event_id=numeric_id,
     )

@@ -19,6 +19,27 @@ def _fresh_rate_limit_budget():
     rate_limiter._limiter = None
 
 
+@pytest.fixture(autouse=True)
+def _offline_logo_enrichment(monkeypatch):
+    """Keep list-logo enrichment from reaching vlr.gg in tests.
+
+    Tests that exercise enrichment install their own fake fetch over this one.
+    """
+    from api import team_logo_enrichment
+    from utils.team_logos import team_logo_store
+
+    async def no_fetch(match_id, store=team_logo_store):
+        store.record_miss(match_id)
+        return False
+
+    team_logo_store.clear()
+    team_logo_enrichment._reset_for_tests()
+    monkeypatch.setattr(team_logo_enrichment, "fetch_match_logos", no_fetch)
+    yield
+    team_logo_store.clear()
+    team_logo_enrichment._reset_for_tests()
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

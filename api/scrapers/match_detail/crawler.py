@@ -18,6 +18,7 @@ from utils.constants import (
 from utils.error_handling import handle_scraper_errors, upstream_error_payload
 from utils.html_parsers import HTMLParser, add_image_variants, parse_html
 from utils.http_client import fetch_theme_variants, fetch_with_retries, get_http_client
+from utils.team_logos import team_logo_store
 
 from .parsers import (
     _is_live,
@@ -175,6 +176,7 @@ async def vlr_match_detail(match_id: str, light: bool = False) -> dict:
             if dark_team is None and index < len(dark_teams):
                 dark_team = dark_teams[index]
             add_image_variants(team, dark_team)
+        team_logo_store.record_match(match_id, teams)
         streams, vods = _parse_streams_vods(base_html)
         maps = _parse_maps(base_html, teams)
         h2h = _parse_head_to_head(base_html, teams)

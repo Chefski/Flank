@@ -36,6 +36,7 @@ from utils.match_records import (
     normalize_match_status,
 )
 from utils.pagination import PaginationConfig, scrape_multiple_pages
+from utils.team_logos import team_logo_store
 
 logger = logging.getLogger(__name__)
 
@@ -287,16 +288,20 @@ async def vlr_live_score():
             canonical_teams = []
             for index in range(2):
                 detail_team = detail_teams[index] if index < len(detail_teams) else {}
-                canonical_teams.append(
-                    match_team(
-                        team_id=detail_team.get("id", ""),
-                        name=match_data["teams"][index],
-                        tag=detail_team.get("tag", ""),
-                        country_code=_country_code(match_data["flags"][index]),
-                        logo=team_logos_light[index],
-                        score=match_data["scores"][index],
-                    )
+                team = match_team(
+                    team_id=detail_team.get("id", ""),
+                    name=match_data["teams"][index],
+                    tag=detail_team.get("tag", ""),
+                    country_code=_country_code(match_data["flags"][index]),
+                    logo=team_logos_light[index],
+                    score=match_data["scores"][index],
                 )
+                team["url"] = detail_team.get("url", "")
+                team["logo_light"] = team_logos_light[index]
+                team["logo_dark"] = team_logos_dark[index] or team_logos_light[index]
+                canonical_teams.append(team)
+            if detail_response_pair is not None:
+                team_logo_store.record_match(match_data["match_id"], canonical_teams)
             event_stage, event_series = _split_event_context(
                 detail_event.get("series", "") or match_data["match_series"]
             )
