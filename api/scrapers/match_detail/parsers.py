@@ -285,11 +285,70 @@ def _parse_teams(html: HTMLParser) -> list[dict]:
     return teams
 
 
+def _external_link(entry) -> str:
+    """Return the outbound URL of a watch-module entry.
+
+    vlr.gg renders each stream/VOD as a ``.sm-btn`` / ``.sm-vod`` block whose
+    clickable body is a plain ``<div class="sm-body js-stream-embed-btn">``
+    (it opens an inline player via JS) plus a sibling
+    ``<a class="sm-ext">`` holding the real outbound URL.
+    """
+    anchor = entry.css_first("a.sm-ext") or entry.css_first("a[href]")
+    if anchor:
+        return anchor.attributes.get("href", "") or ""
+    return ""
+
+
 def _parse_streams_vods(html: HTMLParser) -> tuple[list[dict], list[dict]]:
-    """Extract stream and VOD links with platform and locale metadata."""
+    """Extract stream buttons and VOD links from the match page.
+
+    Current markup uses the ``sm-*`` watch module: streams are ``.sm-btn``
+    entries inside ``.sm-pane-streams`` and VODs are ``.sm-vod`` entries
+    inside ``.sm-pane-vods``. The pre-redesign ``.match-streams-btn`` /
+    ``.match-vods`` markup is still parsed as a fallback.
+    """
     streams: list[dict] = []
     vods: list[dict] = []
 
+    for btn in html.css(".sm-btn"):
+        name_elem = btn.css_first(".sm-name")
+        name = extract_text_content(name_elem) if name_elem else extract_text_content(btn)
+        href = _external_link(btn)
+        if name or href:
+            url = build_full_url(href)
+            embed = btn.css_first(".js-stream-embed-btn")
+            flag = btn.css_first(".flag")
+            platform = btn.attributes.get("data-site", "") or _media_platform(url, name)
+            streams.append(
+                {
+                    "name": name,
+                    "url": url,
+                    "platform": platform,
+                    "country_code": _class_modifier(flag),
+                    "is_embedded": "mod-embed" in btn.attributes.get("class", ""),
+                    "site_id": embed.attributes.get("data-site-id", "") if embed else "",
+                }
+            )
+
+    for vod in html.css(".sm-vod"):
+        name_elem = vod.css_first(".sm-vod-name")
+        name = extract_text_content(name_elem) if name_elem else extract_text_content(vod)
+        href = _external_link(vod)
+        if name or href:
+            map_match = re.search(r"\bMap\s+(\d+)\b", name, re.IGNORECASE)
+            vods.append(
+                {
+                    "name": name,
+                    "url": build_full_url(href),
+                    "platform": _media_platform(href, name),
+                    "map_number": int(map_match.group(1)) if map_match else None,
+                }
+            )
+
+    if streams or vods:
+        return streams, vods
+
+    # Legacy markup fallback (.match-streams-btn / .match-vods).
     for btn in html.css(".match-streams-btn"):
         external = btn if btn.tag == "a" else btn.css_first(".match-streams-btn-external")
         href = external.attributes.get("href", "") if external else ""
@@ -384,7 +443,7 @@ def _player_payload(
     agent = ""
     agent_slug = ""
     if agent_image:
-        agent = agent_image.attributes.get("title", "") or agent_image.attributes.get("alt", "")
+        agent = _agent_from_img(agent_image)
         src = agent_image.attributes.get("src", "")
         agent_slug = (
             urlparse(src).path.rsplit("/", 1)[-1].split(".", 1)[0]
@@ -405,18 +464,52 @@ def _player_payload(
         "defense": side_stats["defense"],
     }
 
+
+_AGENT_SLUG_NAMES = {"kayo": "KAY/O"}
+
+
+def _agent_from_img(img) -> str:
+    """Agent display name from an agent icon: title, alt, then the src slug.
+
+    vlr.gg has shipped agent icons with no ``title``/``alt`` at all, leaving the
+    src as the only clue, so the slug is a real fallback rather than a guard.
+    """
+    if img is None:
+        return ""
+    for attr in ("title", "alt"):
+        value = (img.attributes.get(attr, "") or "").strip()
+        if value:
+            return value
+    src = img.attributes.get("src", "") or ""
+    if "/agents/" not in src:
+        return ""
+    slug = src.rsplit("/", 1)[-1].rsplit(".", 1)[0].strip().lower()
+    if not slug:
+        return ""
+    return _AGENT_SLUG_NAMES.get(slug, slug.replace("-", " ").title())
+
+
 def _parse_player_row_div(player_cell, stat_cells: list) -> dict:
     """Parse a single player from the new ovw-cell div-based layout.
 
-    Each player occupies 11 consecutive ``.ovw-cell`` divs: a ``mod-player``
-    cell with name / agent, followed by 10 stat cells keyed by ``data-col``
-    (rating2, acs, kills, kd-diff, kast, adr, hsp, fb, fd, fk-diff).
+    Each player spans a ``mod-player`` cell with the name, then 10 stat cells
+    keyed by ``data-col`` (rating2, acs, kills, kd-diff, kast, adr, hsp, fb,
+    fd, fk-diff).
+
+    The agent icon lives in its own ``mod-agents`` cell *beside* the player
+    cell since late 2026; it used to be nested inside it, so both places are
+    read and a player with no agent cell simply leaves the field empty (#247).
 
     The ``data-col="kills"`` cell is special: it uses ``.mod-kda`` and
     contains kills / deaths / assists inside ``.ovw-kda-stat`` sub-elements.
     """
-    agents = player_cell.css_first(".ovw-agents")
-    agent_image = agents.css_first("img") if agents else None
+    agents_cell = player_cell.css_first(".ovw-agents")
+    if agents_cell is None:
+        for cell in stat_cells:
+            if "mod-agents" in (cell.attributes.get("class", "") or ""):
+                agents_cell = cell
+                break
+    agent_image = agents_cell.css_first("img") if agents_cell is not None else None
     side_stats = {
         "overall": _empty_side_stats(),
         "attack": _empty_side_stats(),
@@ -454,31 +547,37 @@ def _parse_map_players(game_elem) -> dict:
     """Parse per-team player stats from the ovw-cell div-based layout.
 
     VLR now renders player stats as a flat sequence of ``.ovw-cell`` divs.
-    Each player uses 11 cells: ``.ovw-cell.mod-player`` (name + agent)
-    followed by 10 stat cells. The first 5 players are team 1, the next 5
-    are team 2. Falls back to the old ``table.wf-table-inset.mod-overview``
-    format when present.
+    Each player starts at a ``.ovw-cell.mod-player`` (name) and continues until
+    the next one: an optional ``.ovw-cell.mod-agents`` followed by 10 stat
+    cells. The first 5 players are team 1, the next 5 are team 2. Falls back to
+    the old ``table.wf-table-inset.mod-overview`` format when present.
     """
     team1_players: list[dict] = []
     team2_players: list[dict] = []
 
     all_cells = game_elem.css(".ovw-cell")
-    player_cells = [c for c in all_cells if "mod-player" in (c.attributes.get("class", "") or "")]
-    non_player_cells = [c for c in all_cells if "mod-player" not in (c.attributes.get("class", "") or "")]
 
-    player_count = len(player_cells)
-    stats_per_player = len(non_player_cells) // max(player_count, 1)
+    def is_player_cell(cell) -> bool:
+        return "mod-player" in (cell.attributes.get("class", "") or "")
+
+    # Group cells by the boundaries between ``.mod-player`` cells rather than
+    # dividing a flat list. vlr.gg added a separate ``.mod-agents`` cell per
+    # player (#247), so the per-player cell count is no longer fixed: a player
+    # missing its agent cell would shift every later player's stats by one.
+    groups: list[tuple] = []
+    for cell in all_cells:
+        if is_player_cell(cell):
+            groups.append((cell, []))
+        elif groups:
+            groups[-1][1].append(cell)
+
+    player_count = len(groups)
 
     def parse_players_from_range(start: int, count: int) -> list[dict]:
         players = []
-        for i in range(count):
-            pi = start + i
-            if pi >= player_count:
-                break
-            stat_start = (start + i) * stats_per_player
-            stat_group = non_player_cells[stat_start:stat_start + stats_per_player]
+        for player_cell, stat_group in groups[start:start + count]:
             try:
-                players.append(_parse_player_row_div(player_cells[pi], stat_group))
+                players.append(_parse_player_row_div(player_cell, stat_group))
             except Exception as exc:
                 logger.debug("Skipping player row due to parse error: %s", exc)
         return players
@@ -562,9 +661,6 @@ def _parse_player_row_table(cells: list) -> dict:
 def _parse_map_scores(game_elem) -> dict:
     """
     Extract team scores and CT/T/OT splits from a single game header.
-
-    Updated for new VLR layout where the first team has the score on the
-    left (before the map column) and the second team on the right.
     """
     result = {
         "score": {"team1": "", "team2": ""},
@@ -632,6 +728,14 @@ def _parse_map_scores(game_elem) -> dict:
 def _parse_rounds(game_elem) -> list[dict]:
     """
     Parse round winners, sides, score progression, and ending methods.
+
+    vlr.gg renders every potential round slot, so a map that ended 13-9 still
+    shows 24 columns: the unplayed ones carry no ``mod-win`` square. Those are
+    skipped rather than reported as played rounds with an empty winner.
+
+    A round icon names how the round was won (``elim``, ``boom``, ``defuse``,
+    ``time``); it sits on the winning square, so it is read there. The code is
+    exposed both as ``method_code`` and upstream's ``win_type``.
     """
     rounds: list[dict] = []
     rounds_container = game_elem.css_first(".vlr-rounds")
@@ -701,6 +805,7 @@ def _parse_rounds(game_elem) -> list[dict]:
                     ),
                     "method": _ROUND_METHODS.get(method_code, method_code),
                     "method_code": method_code,
+                    "win_type": method_code,
                     "method_icon": build_full_url(method_src),
                     "score_after": score_after,
                 }
@@ -725,14 +830,19 @@ def _parse_maps(html: HTMLParser, teams: list[dict] | None = None) -> list[dict]
         pick = None
         map_container = game_elem.css_first(".vm-stats-game-header .map")
         if map_container:
-            picked = map_container.css_first(".picked")
+            picked = map_container.css_first(".picked") or game_elem.css_first(".picked")
             picked_text = extract_text_content(picked)
             duration_node = map_container.css_first(".map-duration")
             duration_text = extract_text_content(duration_node)
-            map_name = extract_text_content(map_container)
+            name_node = map_container.css_first(".map-name")
+            map_name = extract_text_content(name_node or map_container)
             for suffix in (picked_text, duration_text):
                 if suffix:
                     map_name = map_name.replace(suffix, "", 1).strip()
+            map_name = re.sub(r"\s*\d{1,2}:\d{2}(?::\d{2})?\s*$", "", map_name).strip()
+            map_name = re.sub(
+                r"\s*(PICK|BAN|DECIDER)\s*$", "", map_name, flags=re.IGNORECASE
+            ).strip()
 
             pick_slot = ""
             if picked:
@@ -750,7 +860,28 @@ def _parse_maps(html: HTMLParser, teams: list[dict] | None = None) -> list[dict]
                             "team": picked_by,
                             "team_url": team.get("url", ""),
                         }
-                if not picked_by and picked_text.lower() != "pick":
+                    else:
+                        # No parsed teams: read the names the page itself shows.
+                        names = [
+                            extract_text_content(node)
+                            for node in game_elem.css(".vm-stats-game-header .team .team-name")
+                        ] or [
+                            extract_text_content(node)
+                            for node in html.css(".match-header-link-name .wf-title-med")
+                        ]
+                        if team_index < len(names) and names[team_index]:
+                            picked_by = names[team_index]
+                            pick = {
+                                "slot": pick_slot,
+                                "team_id": "",
+                                "team": picked_by,
+                                "team_url": "",
+                            }
+                if not picked_by and picked_text and picked_text.lower() not in (
+                    "pick",
+                    "ban",
+                    "decider",
+                ):
                     picked_by = picked_text
                     pick = {
                         "slot": pick_slot,
@@ -1105,12 +1236,93 @@ def _parse_advanced_stats(html: HTMLParser) -> list[dict]:
 # Economy tab parser
 # ---------------------------------------------------------------------------
 
-def _parse_economy(html: HTMLParser) -> list[dict]:
-    """
-    Parse the economy table from the economy tab.
+def _ecm_group_title(table) -> str:
+    """Read the buy-state label of a ``table.ecm`` row group ("On Eco <10k").
 
-    Rows per team with pistol/eco/semi-buy/full-buy win rates.
+    The spend range lives in ``.ecm-gt-r`` *inside* the ``.ecm-gt-t`` label, so
+    the range text is re-joined with the label that already contains it.
     """
+    gt = table.css_first("th.ecm-gt")
+    if gt is None:
+        return ""
+    band = extract_text_content(gt.css_first(".ecm-gt-r"))
+    name = extract_text_content(gt.css_first(".ecm-gt-t") or gt)
+    return f"{name.removesuffix(band).strip()} {band}".strip()
+
+
+def _ecm_labels(table) -> list[str]:
+    """Read a ``table.ecm`` table's column labels from its first header row.
+
+    The pistol table labels its columns with ``th.ecm-step``; the buy-state
+    tables label them at the *bottom* with ``th.ecm-foot``, and may pad the row
+    with an empty ``th.ecm-xt`` spacer, so empty cells are dropped.
+    """
+    for row in table.css("tr"):
+        if row.css("td"):
+            continue
+        if row.css_first("th.ecm-gt") is not None:
+            continue
+        labels = [extract_text_content(cell) for cell in row.css("th")]
+        labels = [label for label in labels if label]
+        if labels:
+            return labels
+    return []
+
+
+def _ecm_value(cell) -> str:
+    """Read one economy data cell; ``.mod-empty`` cells mean "no data"."""
+    score = cell.css_first(".ecm-score")
+    return extract_text_content(score) if score is not None else ""
+
+
+def _parse_economy_groups(scope) -> list[dict]:
+    """Parse the economy tab's ``.ecm-groups`` markup, one row per team.
+
+    Each group holds four ``table.ecm`` blocks: the first carries the team names
+    with Pistol/Conv./Bonus, then "On Eco", "On Half buy" and "On Full buy"
+    tables whose rows either repeat the team name (``th.ecm-team-th.ecm-xt``) or
+    omit it and rely on row order to line up with the previous named table.
+
+    Values keep vlr.gg's ``wins/attempts`` form. Buy-state columns are namespaced
+    by their group title ("On Full buy 18k+: vs. Eco") because the plain column
+    labels repeat across groups.
+    """
+    economy: list[dict] = []
+    by_team: dict[str, dict] = {}
+    team_order: list[str] = []
+
+    for table in scope.css("table.ecm"):
+        title = _ecm_group_title(table)
+        names = [extract_text_content(cell) for cell in table.css("th.ecm-team-th")]
+        if names:
+            team_order = names
+            for name in names:
+                if name not in by_team:
+                    row = {"Team": name}
+                    by_team[name] = row
+                    economy.append(row)
+
+        labels = _ecm_labels(table)
+        team_index = 0
+        for row in table.css("tr"):
+            cells = row.css("td")
+            if not cells:
+                continue
+            order = names or team_order
+            name = order[team_index] if team_index < len(order) else ""
+            team_index += 1
+            team_row = by_team.get(name)
+            if team_row is None:
+                continue
+            for label, cell in zip(labels, cells):
+                key = f"{title}: {label}" if title else label
+                team_row[key] = _ecm_value(cell)
+
+    return economy
+
+
+def _parse_economy_legacy(html: HTMLParser) -> list[dict]:
+    """Parse the pre-redesign economy table (``table.wf-table-inset.mod-econ``)."""
     economy: list[dict] = []
 
     table = _performance_table(html, "table.wf-table-inset.mod-econ")
@@ -1142,3 +1354,19 @@ def _parse_economy(html: HTMLParser) -> list[dict]:
         economy.append(row_dict)
 
     return economy
+
+
+def _parse_economy(html: HTMLParser) -> list[dict]:
+    """Parse the economy table from the economy tab.
+
+    vlr.gg rolled out the ``table.ecm`` economy widget in October 2026 (issue
+    #194); ``table.wf-table-inset.mod-econ`` is kept as a fallback for pages
+    still serving the old markup. Tab pages embed *every* map's block, so the
+    parse is scoped to ``.vm-stats-game.mod-active`` — the requested game — when
+    that wrapper exists.
+    """
+    scope = html.css_first(".vm-stats-game.mod-active") or html
+    economy = _parse_economy_groups(scope)
+    if economy:
+        return economy
+    return _parse_economy_legacy(scope)

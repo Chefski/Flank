@@ -1,0 +1,269 @@
+name: vlr.gg selector check
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily at 06:00 UTC
+  workflow_dispatch: # manual trigger
+  push:
+    paths:
+      - "tests/test_vlr_selectors.py"
+      - ".github/workflows/selector-check.yml"
+
+# The repo default workflow token is read-write. This job reads code, parses
+# live vlr.gg HTML, and files an issue — nothing else.
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-selectors:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # UV_PYTHON wins over .python-version, which pins 3.11.
+    env:
+      UV_PYTHON: "3.12"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run selector validation
+        id: check
+        continue-on-error: true
+        env:
+          CI: "true"
+          SELECTOR_REPORT_PATH: selector-report.json
+          PYTHONPATH: "."
+        run: uv run pytest tests/test_vlr_selectors.py -v --tb=short
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: selector-report
+          path: selector-report.json
+          retention-days: 7
+
+      - name: Create issue on failure
+        if: steps.check.outcome == 'failure'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require("fs");
+
+            let report;
+            let reportMissing = false;
+            try {
+              report = JSON.parse(fs.readFileSync("selector-report.json", "utf8"));
+            } catch {
+              // No report file: the suite failed before writing results
+              // (e.g. collection/import error). Surface that instead of "0 pages".
+              reportMissing = true;
+              report = [];
+            }
+
+            // Separate required vs optional failures. `data_conditional_missing`
+            // selectors (rare data states such as overtime) are reported but are
+            // deliberately not escalated, so they are filtered out of the
+            // "must fix" optional bucket.
+            const failedRequired = report.filter(r => r.broken_required.length > 0);
+            const failedOptional = report.filter(
+              r => (r.broken_optional || []).some(
+                s => !(r.data_conditional_missing || []).includes(s)
+              ) && r.broken_required.length === 0
+            );
+            const unverifiable = report.filter(r => r.unverifiable);
+            const fetchErrors = report.filter(r => r.fetch_error);
+            // A page is healthy when it has no broken required selectors and no
+            // *escalatable* optional gaps. Missing data-conditional selectors are
+            // explained by the data state and do not make a page unhealthy.
+            const optionalFailures = r =>
+              (r.broken_optional || []).filter(
+                s => !(r.data_conditional_missing || []).includes(s)
+              ).length;
+            const okCount = report.filter(
+              r => !r.failed && !r.unverifiable && optionalFailures(r) === 0
+            ).length;
+
+            // Build issue body
+            const lines = [];
+
+            lines.push("## vlr.gg layout change detected");
+            lines.push("");
+            if (reportMissing) {
+              lines.push(
+                "> ⚠️ The selector test run produced **no report file**, so no pages could be " +
+                "checked. The suite likely failed to start (e.g. a dependency/import error). " +
+                "**Check the workflow logs** for the real error rather than the table below."
+              );
+              lines.push("");
+            }
+            lines.push(
+              `Selector check ran against **${report.length}** pages: ` +
+              `**${okCount}** passed, **${failedRequired.length}** have broken required selectors, ` +
+              `**${failedOptional.length}** have missing optional selectors` +
+              (unverifiable.length
+                ? `, **${unverifiable.length}** could not be verified (no usable witness page)`
+                : "") +
+              `.`
+            );
+            lines.push("");
+            lines.push(
+              "> Witness pages are **discovered from vlr.gg listings at run time**, so a selector " +
+              "is only reported when it is missing from *every* page fetched for that page type. " +
+              "A selector whose absence is explained is declared `data_conditional` in " +
+              "`tests/test_vlr_selectors.py` and is reported without being escalated. Two " +
+              "reasons qualify: a rare data state (for example `.mod-ot` renders only on a " +
+              "match that went to overtime) or a page-level markup variant (for example the " +
+              "legacy `.match-h2h-matches` container still served on a subset of pages while " +
+              "vlr.gg rolls out its replacement)."
+            );
+            lines.push("");
+
+            if (unverifiable.length > 0) {
+              lines.push("### Pages that could not be verified");
+              lines.push("");
+              lines.push(
+                "No fetched page rendered the page type's structural anchors, so no selector " +
+                "could be asserted either way. This usually means the witness discovery step " +
+                "returned pages in an unexpected state. **This is not proof of a layout change.**"
+              );
+              lines.push("");
+              lines.push("| Page | Witness URLs | Pages fetched | Reason |");
+              lines.push("|------|--------------|---------------|--------|");
+              for (const r of unverifiable) {
+                lines.push(
+                  `| ${r.page} | ${(r.urls || []).join("<br>")} | ${r.pages_fetched} | ` +
+                  `${r.unverifiable_reason || "unknown"} |`
+                );
+              }
+              lines.push("");
+            }
+
+            if (failedRequired.length > 0) {
+              lines.push("### Broken required selectors (will cause scraper errors)");
+              lines.push("");
+              lines.push("| Page | URL | Broken selector | Source file to fix | Fix guidance |");
+              lines.push("|------|-----|----------------|-------------------|-------------|");
+              for (const r of failedRequired) {
+                for (const sel of r.broken_required) {
+                  lines.push(
+                    `| ${r.page} | [vlr.gg](${r.urls[0]}) | \`${sel}\` | \`${r.source}\` | ` +
+                    `Inspected ${r.urls.length} witness page(s) and found \`${sel}\` on none. ` +
+                    `Check [${r.urls[0]}](${r.urls[0]}) for the new HTML element replacing it, ` +
+                    `then update the selector in \`${r.source}\`. |`
+                  );
+                }
+              }
+              lines.push("");
+            }
+
+            if (failedOptional.length > 0) {
+              lines.push("### Missing optional selectors (fallback or degraded paths)");
+              lines.push("");
+              lines.push(
+                "Missing from **every** witness page for that page type. Selectors listed as " +
+                "data-conditional are excluded here — their absence is explained by the data " +
+                "state (for example \`.mod-ot\` only renders on a match that went to overtime) " +
+                "or by a page-level markup variant (for example the legacy " +
+                "\`.match-h2h-matches\` container, still served on only some pages)."
+              );
+              lines.push("");
+              lines.push("| Page | Witness URL | Missing selector | Source file | Action |");
+              lines.push("|------|-------------|-----------------|-------------|--------|");
+              for (const r of failedOptional) {
+                const dataConditional = r.data_conditional_missing || [];
+                for (const sel of r.broken_optional) {
+                  if (dataConditional.includes(sel)) continue;
+                  lines.push(
+                    `| ${r.page} | [vlr.gg](${r.urls[0]}) | \`${sel}\` | \`${r.source}\` | ` +
+                    `Missing from all ${r.urls.length} witness page(s). Check if the element ` +
+                    `still exists on the page. If the layout changed, update or add a fallback ` +
+                    `selector in \`${r.source}\`. If its absence is explained — a rare data ` +
+                    `state or a page-level markup variant — add it to \`data_conditional\` in ` +
+                    `\`tests/test_vlr_selectors.py\`. |`
+                  );
+                }
+              }
+              lines.push("");
+            }
+
+            if (fetchErrors.length > 0) {
+              lines.push("### Fetch errors");
+              lines.push("");
+              lines.push(
+                "These pages could not be fetched at all, including **witness discovery**. " +
+                "A discovery failure means no page of that type could be checked."
+              );
+              lines.push("");
+              for (const r of fetchErrors) {
+                lines.push(`- **${r.page}** (${(r.urls || []).join(", ")}): ${r.fetch_error}`);
+              }
+              lines.push("");
+            }
+
+            lines.push("### How to fix");
+            lines.push("");
+            lines.push("1. Open the witness URL(s) above in a browser");
+            lines.push("2. Inspect the new HTML structure (right-click → Inspect)");
+            lines.push("3. Find the new CSS class/selector that replaced the broken one");
+            lines.push("4. Update the selector in the `source` file listed above");
+            lines.push("5. Run `uv run pytest tests/test_vlr_selectors.py -v` locally to verify");
+            lines.push("6. Re-run this workflow from the Actions tab to confirm the fix");
+            lines.push("");
+            lines.push(
+              "If a selector's absence is explained — it renders only in a rare data state, or " +
+              "only on a subset of pages while a markup rollout completes — add it to that page " +
+              "type's `data_conditional` list in `tests/test_vlr_selectors.py` instead of " +
+              "loosening the selector — but verify on a live page first, since that list is " +
+              "where a real break could hide."
+            );
+            lines.push("");
+            lines.push(
+              `_Auto-generated by [selector-check workflow]` +
+              `(https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/selector-check.yml)_`
+            );
+
+            const body = lines.join("\n");
+
+            // Create or update issue
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ["selector-check"],
+              state: "open",
+            });
+
+            const title = "vlr.gg layout change detected — scrapers may be broken";
+
+            if (issues.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["selector-check", "bug"],
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues[0].number,
+                body,
+              });
+            }
+
+      # `continue-on-error` above keeps the report/issue steps running, but the
+      # job must still go red so the scheduled failure (and its notification)
+      # is not silent.
+      - name: Fail the run when selectors broke
+        if: steps.check.outcome == 'failure'
+        run: exit 1

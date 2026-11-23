@@ -12,6 +12,8 @@ from urllib.parse import urlencode
 from fastapi import HTTPException
 
 from api.scrapers.stats import (
+    _LEGACY_DATA_COLS,
+    DEFAULT_STATS_SORT,
     REQUIRED_STATS_KEYS,
     STATS_DIRECTIONS,
     STATS_ROLES,
@@ -63,7 +65,7 @@ def normalize_excluded_series(value: str | None) -> str:
 
 @dataclass(frozen=True)
 class EventStatsFilters:
-    sort: str = "rating2"
+    sort: str = DEFAULT_STATS_SORT
     direction: str = "desc"
     side: str = "all"
     role: str = "all"
@@ -80,10 +82,21 @@ class EventStatsFilters:
     def metadata(self) -> dict[str, str | int]:
         return self.query()
 
+    def echoed_query(self) -> dict[str, str | int]:
+        """Filters the event stats form echoes back faithfully.
+
+        ``agent`` is excluded because ticking a role pre-ticks every agent of
+        that role, and ``exclude`` is a stage-selection list, not a form control.
+        """
+        values = self.query()
+        values.pop("agent")
+        values.pop("exclude")
+        return values
+
 
 def normalize_event_stats_filters(
     *,
-    sort: str = "rating2",
+    sort: str = DEFAULT_STATS_SORT,
     direction: str = "desc",
     side: str = "all",
     role: str = "all",
@@ -93,6 +106,7 @@ def normalize_event_stats_filters(
     exclude: str | None = None,
 ) -> EventStatsFilters:
     sort = sort.lower()
+    sort = _LEGACY_DATA_COLS.get(sort, sort)
     direction = direction.lower()
     side = side.lower()
     role = role.lower()
@@ -404,7 +418,7 @@ async def vlr_event_stats(event_id: str, **filter_values) -> dict:
         status, html = await _fetch_event_resource(url, f"event stats {event_id}")
         _raise_filter_mismatch(
             "stats",
-            _event_filter_mismatches(html, filters.query()),
+            _event_filter_mismatches(html, filters.echoed_query()),
         )
         col_map = _build_column_map(html)
         if col_map is not None:

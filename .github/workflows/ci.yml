@@ -2,13 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [dev, master]
+    branches: [master]
   pull_request:
-    branches: [dev, master]
+    branches: [master]
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -17,38 +17,38 @@ permissions:
 jobs:
   test:
     name: Test Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
+    # UV_PYTHON wins over .python-version, which would otherwise pin every
+    # matrix job to the project's single pinned interpreter.
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: requirements.txt
-
-      - name: Set up Python
-        uses: actions/setup-python@v6.2.0
-        with:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv pip install --system -r requirements.txt
+        run: uv sync --locked
 
       - name: Lint with Ruff
-        run: uv pip install --system ruff && ruff check --output-format=github
+        run: uv run ruff check --output-format=github
 
       - name: Audit dependencies
-        run: uv pip install --system pip-audit && pip-audit -r requirements.txt
+        run: uv run pip-audit
 
       - name: Run tests
-        run: pytest -q --cov --cov-report=term-missing --cov-fail-under=50
+        run: uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=50
 
   docker-smoke:
     name: Docker smoke build
@@ -61,15 +61,15 @@ jobs:
   publish:
     name: Publish Docker image
     needs: test
+    # Trunk-based: master is the only long-lived branch, so every push to it is
+    # a release and (re)tags :latest.
     if: >
       github.event_name == 'push' &&
-      (github.ref == 'refs/heads/dev' ||
-       github.ref == 'refs/heads/master')
+      github.ref == 'refs/heads/master'
     uses: ./.github/workflows/container.yml
     with:
       push: true
       image-tags: |
-        type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
         type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
     secrets:
       GHCR_PAT: ${{ secrets.GHCR_PAT }}

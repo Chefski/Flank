@@ -25,9 +25,8 @@ updates:
           - "*"
         update-types:
           - "major"
-    target-branch: "dev"
 
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -43,18 +42,17 @@ updates:
       semver-minor-days: 14
       semver-patch-days: 7
     groups:
-      pip-routine:
+      uv-routine:
         patterns:
           - "*"
         update-types:
           - "minor"
           - "patch"
-      pip-major:
+      uv-major:
         patterns:
           - "*"
         update-types:
           - "major"
-    target-branch: "dev"
 
   - package-ecosystem: "docker"
     directory: "/"
@@ -81,4 +79,3 @@ updates:
           - "*"
         update-types:
           - "major"
-    target-branch: "dev"

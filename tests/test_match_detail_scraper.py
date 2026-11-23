@@ -8,12 +8,117 @@ from api.scrapers.match_detail.parsers import (
     _parse_event_info,
     _parse_head_to_head,
     _parse_kill_matrix,
+    _parse_map_players,
     _parse_maps,
     _parse_match_header,
+    _parse_rounds,
     _parse_streams_vods,
 )
 from utils.cache_manager import cache_manager
 from utils.html_parsers import parse_html
+
+# vlr.gg markup since the late-2026 "sm-*" streams/VODs redesign (issue #183).
+# Streams live in .sm-pane-streams as .sm-btn blocks whose external URL is an
+# <a class="sm-ext"> sibling; VODs live in .sm-pane-vods as .sm-vod blocks with
+# a .sm-vod-name label. The old .match-streams-btn / .match-vods selectors are
+# gone from the page entirely.
+STREAMS_VODS_HTML = """
+<html>
+  <div class="sm-root js-sm-root mod-cols mod-vods">
+    <div class="sm-pane sm-pane-streams">
+      <div class="sm-group">
+        <label class="zx-chk"><input type="checkbox" class="js-sm-sw"><span>Official</span></label>
+      </div>
+      <div class="match-streams-container js-sm-grid">
+        <div class="sm-btn mod-embed" data-type="broadcast" data-site="twitch">
+          <div class="sm-body js-stream-embed-btn" data-site-id="valorant_americas" data-embed-site="twitch">
+            <i class="flag mod-us"></i><span class="sm-name">VCT Americas</span>
+          </div>
+          <a class="sm-ext" href="https://www.twitch.tv/valorant_americas" target="_blank" title="Open on Twitch">
+            <i class="sm-plat fa fa-twitch"></i>
+          </a>
+        </div>
+        <div class="sm-btn mod-embed" data-type="watchparty" data-site="kick">
+          <div class="sm-body js-stream-embed-btn" data-site-id="sliggy" data-embed-site="kick">
+            <span class="sm-name">Sliggy</span>
+          </div>
+          <a class="sm-ext" href="https://kick.com/sliggy" target="_blank" title="Open on Kick">
+            <i class="sm-plat fa fa-kick"></i>
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="sm-pane sm-pane-vods">
+      <div class="sm-vods match-streams-container mod-fill">
+        <div class="sm-vod mod-embed" data-site="youtube">
+          <div class="sm-body js-stream-embed-btn" data-embed-kind="vod" data-site-id="Jzj8AzjTxMM" data-embed-start="304">
+            <span class="sm-vod-num">1</span><span class="sm-vod-name">Summit</span>
+          </div>
+          <a class="sm-ext" href="https://youtu.be/Jzj8AzjTxMM?t=304" target="_blank" title="Open on Youtube">
+            <i class="sm-plat fa fa-youtube-play"></i>
+          </a>
+        </div>
+        <div class="sm-vod mod-embed" data-site="youtube">
+          <div class="sm-body js-stream-embed-btn" data-embed-kind="vod" data-site-id="Jzj8AzjTxMM" data-embed-start="3001">
+            <span class="sm-vod-num">2</span><span class="sm-vod-name">Haven</span>
+          </div>
+          <a class="sm-ext" href="https://youtu.be/Jzj8AzjTxMM?t=3001" target="_blank" title="Open on Youtube">
+            <i class="sm-plat fa fa-youtube-play"></i>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</html>
+"""
+
+# Pre-redesign markup, kept working as a fallback.
+LEGACY_STREAMS_VODS_HTML = """
+<html>
+  <div class="match-streams">
+    <a class="match-streams-btn" href="https://www.twitch.tv/valorant">Valorant</a>
+  </div>
+  <div class="match-vods">
+    <a href="https://youtu.be/abc?t=10">Ascent</a>
+  </div>
+</html>
+"""
+
+
+def test_parse_streams_vods_reads_sm_panes():
+    streams, vods = _parse_streams_vods(parse_html(STREAMS_VODS_HTML))
+
+    assert [stream["platform"] for stream in streams] == ["twitch", "kick"]
+    assert streams[0]["country_code"] == "us"
+    assert streams[0]["site_id"] == "valorant_americas"
+    assert streams[0]["is_embedded"] is True
+    assert vods[0]["platform"] == "youtube"
+    streams = [{"name": s["name"], "url": s["url"]} for s in streams]
+    vods = [{"name": v["name"], "url": v["url"]} for v in vods]
+    assert streams == [
+        {"name": "VCT Americas", "url": "https://www.twitch.tv/valorant_americas"},
+        {"name": "Sliggy", "url": "https://kick.com/sliggy"},
+    ]
+    assert vods == [
+        {"name": "Summit", "url": "https://youtu.be/Jzj8AzjTxMM?t=304"},
+        {"name": "Haven", "url": "https://youtu.be/Jzj8AzjTxMM?t=3001"},
+    ]
+
+
+def test_parse_streams_vods_falls_back_to_legacy_markup():
+    streams, vods = _parse_streams_vods(parse_html(LEGACY_STREAMS_VODS_HTML))
+    streams = [{"name": s["name"], "url": s["url"]} for s in streams]
+    vods = [{"name": v["name"], "url": v["url"]} for v in vods]
+
+    assert streams == [{"name": "Valorant", "url": "https://www.twitch.tv/valorant"}]
+    assert vods == [{"name": "Ascent", "url": "https://youtu.be/abc?t=10"}]
+
+
+def test_parse_streams_vods_empty_when_match_has_no_watch_module():
+    streams, vods = _parse_streams_vods(parse_html("<html><body></body></html>"))
+
+    assert streams == []
+    assert vods == []
 
 PLAYER_ROW = """
 <tr>
@@ -88,6 +193,44 @@ LIGHT_MATCH_HTML = BASE_MATCH_HTML.replace(
 DARK_MATCH_HTML = LIGHT_MATCH_HTML.replace("-light.png", "-dark.png")
 
 
+LIVE_PICKED_HTML = """
+<html>
+  <div class="vm-stats-game" data-game-id="g1">
+    <div class="vm-stats-game-header">
+      <div class="team"><div class="team-name">Alpha</div></div>
+      <div class="team"><div class="team-name">Bravo</div></div>
+      <div class="map">
+        <div class="map-name">
+          <span>Haven<span class="picked mod-2 ge-text-light">PICK</span></span>
+        </div>
+        <div class="map-duration">44:30</div>
+      </div>
+    </div>
+  </div>
+</html>
+"""
+
+
+def test_parse_maps_resolves_live_picked_badge_to_the_picking_team():
+    maps = _parse_maps(parse_html(LIVE_PICKED_HTML))
+
+    assert maps[0]["picked_by"] == "Bravo"
+    assert maps[0]["map_name"] == "Haven"
+
+
+def test_parse_maps_reads_legacy_picked_badge_team_name():
+    maps = _parse_maps(parse_html(BASE_MATCH_HTML))
+
+    assert [entry["picked_by"] for entry in maps] == ["Team One", "Team Two"]
+    assert [entry["map_name"] for entry in maps] == ["Ascent", "Bind"]
+
+
+def test_parse_maps_leaves_picked_by_empty_without_a_badge():
+    maps = _parse_maps(parse_html('<div class="vm-stats-game" data-game-id="g1"></div>'))
+
+    assert maps[0]["picked_by"] == ""
+
+
 def performance_html(opponent_name: str) -> str:
     return f"""
     <html>
@@ -103,7 +246,83 @@ def performance_html(opponent_name: str) -> str:
     """
 
 
+# Economy tab markup as vlr.gg serves it since the 2026-10 redesign (issue #194),
+# captured live from /766311/?game=285688&tab=economy. One .ecm-groups block per
+# map holds four table.ecm blocks: the first carries the team names plus
+# Pistol/Conv./Bonus, then "On Eco", "On Half buy" and "On Full buy" tables whose
+# team rows either repeat the name (th.ecm-team-th.ecm-xt) or omit it and rely on
+# row order. The first .vm-stats-game block is a decoy: every map's block is on
+# the page and only .mod-active belongs to the requested game.
+NEW_ECONOMY_HTML = """
+<html><body>
+  <div class="vm-stats-game">
+    <div class="ecs-top">
+      <div class="ecm-groups">
+        <table class="ecm ecm-open"><tbody>
+          <tr><th></th><th class="ecm-step">Pistol</th></tr>
+          <tr><th class="ecm-team-th" title="Decoy FC"><span class="ecm-team mod-1"><span>Decoy FC</span></span></th><td class="mod-hit"><div class="ecm-score">9<span class="ecm-of">/9</span></div></td></tr>
+        </tbody></table>
+      </div>
+    </div>
+  </div>
+  <div class="vm-stats-game mod-active">
+    <div class="ecs-top">
+      <div class="ecm-groups"><table class="ecm ecm-open"><tbody>
+        <tr><th></th><th class="ecm-step">Pistol</th><th class="ecm-step" title="Converted">Conv.</th><th>Bonus</th></tr>
+        <tr><th class="ecm-team-th" title="AKV.GC"><span class="ecm-team mod-1"><img src="//owcdn.net/img/61da5f0488060.png"><span>AKV.GC</span></span></th><td class="mod-hit"><div class="ecm-score">1<span class="ecm-of">/2</span></div></td><td class="mod-hit"><div class="ecm-score">1<span class="ecm-of">/1</span></div></td><td class="mod-hit"><div class="ecm-score">0<span class="ecm-of">/1</span></div></td></tr>
+        <tr><th class="ecm-team-th" title="MIBR.GC"><span class="ecm-team mod-2"><img src="//owcdn.net/img/632be7626d6d9.png"><span>MIBR.GC</span></span></th><td class="mod-hit"><div class="ecm-score">1<span class="ecm-of">/2</span></div></td><td class="mod-hit"><div class="ecm-score">1<span class="ecm-of">/1</span></div></td><td class="mod-hit"><div class="ecm-score">1<span class="ecm-of">/1</span></div></td></tr>
+      </tbody></table>
+      <table class="ecm"><tbody>
+        <tr><th colspan="3" class="ecm-gt"><span class="ecm-gt-in"><span class="ecc-sq mod-b1"><span class="ecc-q mod-q1"></span></span><span class="ecm-gt-t"><span>On Eco</span><span class="ecm-gt-r">&lt;10k</span></span></span></th></tr>
+        <tr><td class="mod-empty"><span class="ecm-dash">&ndash;</span></td><td class="mod-empty"><span class="ecm-dash">&ndash;</span></td><td class="mod-hit"><div class="ecm-score">0<span class="ecm-of">/2</span></div></td></tr>
+        <tr><td class="mod-empty"><span class="ecm-dash">&ndash;</span></td><td class="mod-empty"><span class="ecm-dash">&ndash;</span></td><td class="mod-hit"><div class="ecm-score">0<span class="ecm-of">/2</span></div></td></tr>
+        <tr><th class="ecm-foot"><span class="ecm-vs">vs.</span> Eco</th><th class="ecm-foot"><span class="ecm-vs">vs.</span> Half</th><th class="ecm-foot"><span class="ecm-vs">vs.</span> Full</th></tr>
+      </tbody></table>
+      <table class="ecm"><tbody>
+        <tr><th class="ecm-xt"></th><th colspan="3" class="ecm-gt"><span class="ecm-gt-in"><span class="ecc-sq mod-b2"><span class="ecc-q mod-q2"></span></span><span class="ecm-gt-t"><span>On Half buy</span><span class="ecm-gt-r">10&ndash;18k</span></span></span></th></tr>
+        <tr><th class="ecm-team-th ecm-xt" title="AKV.GC"><span class="ecm-team mod-1"><img src="//owcdn.net/img/61da5f0488060.png"><span>AKV.GC</span></span></th><td class="mod-empty"><span class="ecm-dash">&ndash;</span></td><td class="mod-empty"><span class="ecm-dash">&ndash;</span></td><td class="mod-hit"><div class="ecm-score">0<span class="ecm-of">/3</span></div></td></tr>
+        <tr><th class="ecm-team-th ecm-xt" title="MIBR.GC"><span class="ecm-team mod-2"><img src="//owcdn.net/img/632be7626d6d9.png"><span>MIBR.GC</span></span></th><td class="mod-empty"><span class="ecm-dash">&ndash;</span></td><td class="mod-empty"><span class="ecm-dash">&ndash;</span></td><td class="mod-hit"><div class="ecm-score">0<span class="ecm-of">/1</span></div></td></tr>
+        <tr><th class="ecm-xt"></th><th class="ecm-foot"><span class="ecm-vs">vs.</span> Eco</th><th class="ecm-foot"><span class="ecm-vs">vs.</span> Half</th><th class="ecm-foot"><span class="ecm-vs">vs.</span> Full</th></tr>
+      </tbody></table>
+      <table class="ecm"><tbody>
+        <tr><th colspan="3" class="ecm-gt"><span class="ecm-gt-in"><span class="ecc-sq mod-b3"><span class="ecc-q mod-q3"></span></span><span class="ecm-gt-t"><span>On Full buy</span><span class="ecm-gt-r">18k+</span></span></span></th></tr>
+        <tr><td class="mod-hit"><div class="ecm-score">2<span class="ecm-of">/2</span></div></td><td class="mod-hit"><div class="ecm-score">1<span class="ecm-of">/1</span></div></td><td class="mod-hit"><div class="ecm-score">4<span class="ecm-of">/8</span></div></td></tr>
+        <tr><td class="mod-hit"><div class="ecm-score">2<span class="ecm-of">/2</span></div></td><td class="mod-hit"><div class="ecm-score">3<span class="ecm-of">/3</span></div></td><td class="mod-hit"><div class="ecm-score">4<span class="ecm-of">/8</span></div></td></tr>
+        <tr><th class="ecm-foot"><span class="ecm-vs">vs.</span> Eco</th><th class="ecm-foot"><span class="ecm-vs">vs.</span> Half</th><th class="ecm-foot"><span class="ecm-vs">vs.</span> Full</th></tr>
+      </tbody></table>
+      </div>
+    </div>
+  </div>
+</body></html>
+"""
+
+
 def economy_html(team_name: str) -> str:
+    """Economy tab in the post-redesign .ecm markup, as the crawler sees it."""
+    return f"""
+    <html>
+      <div class="vm-stats-game mod-active">
+        <div class="ecs-top">
+          <div class="ecm-groups">
+            <table class="ecm ecm-open">
+              <tbody>
+                <tr><th></th><th class="ecm-step">Pistol</th><th class="ecm-step" title="Converted">Conv.</th><th>Bonus</th></tr>
+                <tr>
+                  <th class="ecm-team-th" title="{team_name}"><span class="ecm-team mod-1"><span>{team_name}</span></span></th>
+                  <td class="mod-hit"><div class="ecm-score">1<span class="ecm-of">/2</span></div></td>
+                  <td class="mod-hit"><div class="ecm-score">2<span class="ecm-of">/2</span></div></td>
+                  <td class="mod-hit"><div class="ecm-score">1<span class="ecm-of">/3</span></div></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </html>
+    """
+
+
+def economy_legacy_html(team_name: str) -> str:
     return f"""
     <html>
       <table class="wf-table-inset mod-econ">
@@ -130,6 +349,28 @@ class FakeAsyncClient:
     async def get(self, url: str, timeout=None, headers=None):
         self.calls.append((url, timeout))
         return self._responses[url].pop(0)
+
+
+@pytest.mark.anyio
+async def test_vlr_match_detail_light_skips_the_per_game_tabs(monkeypatch):
+    cache_manager.clear_all()
+    client = FakeAsyncClient(
+        {"https://www.vlr.gg/556": [FakeResponse(200, BASE_MATCH_HTML), FakeResponse(200, BASE_MATCH_HTML)]}
+    )
+
+    monkeypatch.setattr("api.scrapers.match_detail.crawler.get_http_client", lambda: client)
+
+    data = await vlr_match_detail("556", light=True)
+    segment = data["data"]["segments"][0]
+
+    # Only the base page, fetched once per theme (light + dark logo variants).
+    assert [url for url, _timeout in client.calls] == ["https://www.vlr.gg/556"] * 2
+    assert segment["economy"] == []
+    assert all(entry["rows"] == [] for entry in segment["economy_by_map"])
+    assert all(
+        entry["kill_matrix"] == [] and entry["advanced_stats"] == []
+        for entry in segment["performance"]["by_map"]
+    )
 
 
 @pytest.mark.anyio
@@ -174,7 +415,7 @@ async def test_vlr_match_detail_fetches_performance_and_economy_for_all_games(mo
     }
     assert segment["performance"]["advanced_stats"][0]["2K"] == "3"
     assert segment["economy"] == [
-        {"team_id": "100", "Team": "Team One", "Pistol": "50%"}
+        {"Team": "Team One", "Pistol": "1/2", "Conv.": "2/2", "Bonus": "1/3", "team_id": "100"}
     ]
     assert [item["game_id"] for item in segment["performance"]["by_map"]] == [
         "game-1",
@@ -184,7 +425,7 @@ async def test_vlr_match_detail_fetches_performance_and_economy_for_all_games(mo
         "Opponent B": "5"
     }
     assert segment["economy_by_map"][1]["rows"] == [
-        {"team_id": "200", "Team": "Team Two", "Pistol": "50%"}
+        {"Team": "Team Two", "Pistol": "1/2", "Conv.": "2/2", "Bonus": "1/3", "team_id": "200"}
     ]
     assert segment["maps"][0]["performance"]["advanced_stats"][0]["2K"] == "3"
     assert segment["maps"][0]["economy"][0]["team_id"] == "100"
@@ -474,6 +715,7 @@ def test_current_map_identity_side_splits_and_round_methods():
             "side_name": "attack",
             "method": "elimination",
             "method_code": "elim",
+            "win_type": "elim",
             "method_icon": "https://www.vlr.gg/img/vlr/game/elim.webp",
             "score_after": {"team1": 1, "team2": 0},
         }

@@ -2,9 +2,9 @@
 HTML parsers for VLR.GG team profile pages.
 
 Covers team header, rating, roster, event placements,
-match history items, and transaction log items.
+match history items, transaction log items, grouped roster,
+and upcoming fixture cards.
 """
-import logging
 import re
 
 from utils.html_parsers import (
@@ -13,11 +13,10 @@ from utils.html_parsers import (
     extract_region_from_flag,
     infer_platform,
     normalize_image_url,
+    pad_to_length,
     parse_href_id_slug,
 )
 from utils.match_records import parse_history_match_record
-
-logger = logging.getLogger(__name__)
 
 
 def _text(element, strip: bool = True) -> str:
@@ -194,7 +193,11 @@ def _parse_single_roster_item(item, is_staff: bool) -> dict:
     name_block = item.css_first(".team-roster-item-name")
     if name_block:
         full_name_text = _text(name_block)
-        stripped = full_name_text.replace(alias, "").replace(real_name, "").strip()
+        # Strip the longer real name first, and only once each: a plain
+        # .replace(alias, "") removes every occurrence, including one embedded in
+        # the real name (alias "Thuy" inside "Ngoc-Thuy Duong"), which corrupts
+        # the leftover role text into fragments like "Ngoc- Duong".
+        stripped = full_name_text.replace(real_name, "", 1).replace(alias, "", 1).strip()
         role = re.sub(r"\s+", " ", stripped).strip(" -/|")
 
     return {
@@ -292,18 +295,6 @@ def _extract_prize_from_text(text: str) -> str:
     return match.group(0)
 
 
-def _extract_date_from_text(text: str) -> str:
-    if not text:
-        return ""
-    match = re.search(
-        r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
-        r"\.?\s+\d{4}\b|\b\d{4}\b",
-        text,
-        re.IGNORECASE,
-    )
-    return match.group(0) if match else ""
-
-
 # ---------------------------------------------------------------------------
 # Match history item parser
 # ---------------------------------------------------------------------------
@@ -345,8 +336,7 @@ def _parse_team_match_item(
         t_logo = normalize_image_url(_attr(t_logo_img, "src")) if t_logo_img else ""
         teams.append({"name": t_name, "tag": t_tag, "logo": t_logo})
 
-    while len(teams) < 2:
-        teams.append({"name": "", "tag": "", "logo": ""})
+    pad_to_length(teams, 2, lambda: {"name": "", "tag": "", "logo": ""})
 
     event_elem = item.css_first(".m-item-event")
     event_lines = [
@@ -449,4 +439,126 @@ def _parse_transaction_item(item) -> dict | None:
             "country": player_country,
         },
         "role": role,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Grouped roster parser — splits roster into active / staff / former / benched
+# ---------------------------------------------------------------------------
+
+
+def _parse_grouped_roster(html: HTMLParser) -> dict:
+    """Parse the team roster into labelled groups.
+
+    Walks the children of ``.team-summary-container-1`` and assigns each
+    ``.team-roster-item`` to one of four buckets: ``active``, ``staff``,
+    ``former``, or ``benched``, switching on ``.wf-label`` text.
+
+    Returns:
+        ``{"active": [...], "staff": [...], "former": [...], "benched": [...]}``
+    """
+    groups: dict[str, list[dict]] = {
+        "active": [],
+        "staff": [],
+        "former": [],
+        "benched": [],
+    }
+    seen_ids: set[str] = set()
+    current_group = "active"
+
+    container = html.css_first(".team-summary-container-1")
+    if not container:
+        for item in html.css(".team-roster-item"):
+            player = _parse_single_roster_item(item, is_staff=False)
+            dedup_key = player["alias"] or player["id"]
+            if dedup_key and dedup_key not in seen_ids:
+                seen_ids.add(dedup_key)
+                groups["active"].append(player)
+        return groups
+
+    for node in container.css("*"):
+        css_class = node.attributes.get("class", "") or ""
+
+        # Section headers — update current_group when a label is found
+        if "wf-label" in css_class and "team-roster-item" not in css_class:
+            label = node.text(strip=True).lower()
+            if any(kw in label for kw in ("staff", "coach", "analyst", "manager")):
+                current_group = "staff"
+            elif any(kw in label for kw in ("former", "past", "previous")):
+                current_group = "former"
+            elif any(kw in label for kw in ("bench", "inactive", "reserve", "substitute")):
+                current_group = "benched"
+            elif any(kw in label for kw in ("player", "roster", "active", "current")):
+                current_group = "active"
+            continue
+
+        # Roster items belong to the bucket selected by the last .wf-label
+        if "team-roster-item" in css_class and "team-roster-item-" not in css_class:
+            is_staff = current_group == "staff"
+            player = _parse_single_roster_item(node, is_staff)
+            dedup_key = player["alias"] or player["id"]
+            if dedup_key and dedup_key not in seen_ids:
+                seen_ids.add(dedup_key)
+                groups[current_group].append(player)
+
+    return groups
+
+
+# ---------------------------------------------------------------------------
+# Team fixture card parser — single upcoming match from the team page sidebar
+# ---------------------------------------------------------------------------
+
+
+def _parse_team_fixture(item) -> dict | None:
+    """Parse a single upcoming-match card from a team profile page.
+
+    Extracts match id, url, event name, date, time, eta, and both team
+    identities from one ``.m-item`` or ``a[href*='/match/']`` node.
+
+    Returns ``None`` when the node lacks a match url.
+    """
+    anchor = item if item.tag == "a" else item.css_first("a")
+    href = _attr(anchor, "href") if anchor else _attr(item, "href")
+    if not href:
+        return None
+
+    match_id, _ = parse_href_id_slug(href)
+    match_url = build_full_url(href)
+
+    team_elems = item.css(".m-item-team")
+    logo_imgs = item.css(".m-item-logo img")
+    teams: list[dict] = []
+    for i, te in enumerate(team_elems):
+        t_name = _text(te.css_first(".m-item-team-name"))
+        t_tag = _text(te.css_first(".m-item-team-tag"))
+        t_logo_img = logo_imgs[i] if i < len(logo_imgs) else None
+        t_logo = normalize_image_url(_attr(t_logo_img, "src")) if t_logo_img else ""
+        teams.append({"name": t_name, "tag": t_tag, "logo": t_logo})
+
+    pad_to_length(teams, 2, lambda: {"name": "", "tag": "", "logo": ""})
+
+    event_elem = item.css_first(".m-item-event")
+    event_lines = [
+        ln.strip() for ln in (_text(event_elem)).split("\n") if ln.strip()
+    ] if event_elem else []
+    event = event_lines[-1] if event_lines else ""
+
+    date_elem = item.css_first(".m-item-date")
+    raw = _text(date_elem) if date_elem else ""
+    m = re.match(r"(\d{4}/\d{2}/\d{2})", raw)
+    date = m.group(1) if m else ""
+    time = raw[m.end():].strip() if m else raw.strip()
+
+    eta_elem = item.css_first(".h-match-eta") or item.css_first(".match-item-eta")
+    eta = _text(eta_elem)
+
+    return {
+        "match_id": match_id,
+        "url": match_url,
+        "event": event,
+        "date": date,
+        "time": time,
+        "eta": eta,
+        "team1": teams[0],
+        "team2": teams[1],
     }

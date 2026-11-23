@@ -8,10 +8,11 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from fastapi import HTTPException
 
 from utils.cache_manager import cache_manager
-from utils.constants import CACHE_TTL_STATS, VLR_STATS_URL
+from utils.constants import CACHE_TTL_STATS, STATS_TIERS, VLR_STATS_URL
 from utils.error_handling import (
     handle_scraper_errors,
     raise_for_upstream_status,
+    validate_stats_map,
     validate_stats_region,
     validate_timespan,
 )
@@ -30,10 +31,14 @@ logger = logging.getLogger(__name__)
 # future inserted column can never shift the mapping — the positional fragility
 # fixed here has broken this scraper three times (upstream issues #4 and #14, both
 # "vlr.gg added a column", each re-hardcoded to the new numbers).
+# Keys are the CURRENT vlr.gg data-col vocabulary. The October 2026 /stats filter
+# revamp renamed two of them: the rating column went from ``rating2`` to
+# ``rating``, and first-kill rate from ``fbpr`` to ``fkpr``. The pre-revamp names
+# are still read as fallbacks (``_LEGACY_DATA_COLS``) so archived markup parses.
 _STATS_FIELD_MAP = {
     "maps": "maps_played",
     "rnd": "rounds_played",
-    "rating2": "rating",
+    "rating": "rating",
     "acs": "average_combat_score",
     "kd": "kill_deaths",
     "kast": "kill_assists_survived_traded",
@@ -41,7 +46,7 @@ _STATS_FIELD_MAP = {
     "kpr": "kills_per_round",
     "apr": "assists_per_round",
     "fkfd": "first_kill_death_ratio",
-    "fbpr": "first_kills_per_round",
+    "fkpr": "first_kills_per_round",
     "fdpr": "first_deaths_per_round",
     "hsp": "headshot_percentage",
     "clp": "clutch_success_percentage",
@@ -57,7 +62,12 @@ _STATS_FIELD_MAP = {
 # If <thead> is keyed (>=1 data-col) but any of these is absent, the layout changed
 # in a way we cannot safely parse -> fail closed rather than emit a keyed ``None``
 # that would surface downstream as rating=0 and slip past shape guards.
-REQUIRED_STATS_KEYS = frozenset({"rnd", "rating2", "acs", "kd", "adr"})
+REQUIRED_STATS_KEYS = frozenset({"rnd", "rating", "acs", "kd", "adr"})
+
+# Pre-revamp data-col names, mapped to their current equivalents. Applied to the
+# column map so a header that still says ``rating2``/``fbpr`` parses unchanged, and
+# to the public ``sort`` parameter so historical callers keep working.
+_LEGACY_DATA_COLS = {"rating2": "rating", "fbpr": "fkpr"}
 
 # Legacy positional indices, used ONLY when <thead> emits no data-col attributes at
 # all (pre-revamp markup / archived pages). Player is td[0], agents td[1].
@@ -84,11 +94,12 @@ _LEGACY_STATS_INDICES = {
 _prime_lock = asyncio.Lock()
 _primed = False
 
-STATS_TIERS = frozenset({"all", "vct", "vcl", "t3", "gc", "cg", "off"})
+STATS_TIER_FILTERS = frozenset({"all", *STATS_TIERS})
 STATS_SIDES = frozenset({"all", "t", "ct"})
 STATS_ROLES = frozenset({"all", "controller", "initiator", "sentinel", "duelist"})
 STATS_RATINGS = frozenset({0, 1300, 1400, 1500, 1550, 1650, 1750, 1850})
 STATS_SORTS = frozenset(_STATS_FIELD_MAP)
+DEFAULT_STATS_SORT = "rating"
 STATS_DIRECTIONS = frozenset({"asc", "desc"})
 _SAFE_SLUG = re.compile(r"^[a-z0-9-]+$")
 _LEGACY_SPANS = {"30": "30d", "60": "60d", "90": "90d", "all": "all"}
@@ -111,8 +122,10 @@ class StatsFilters:
     min_rating: int
     sort: str
     direction: str
+    event_id: str = "all"
 
     def upstream_query(self) -> dict[str, str | int]:
+        """The normalized logical filter set: cache key and echo-validation input."""
         query: dict[str, str | int] = {
             "sort": self.sort,
             "dir": self.direction,
@@ -126,10 +139,46 @@ class StatsFilters:
             "min_rounds": self.min_rounds,
             "min_rating": self.min_rating,
         }
+        if self.event_id != "all":
+            query["event_id"] = self.event_id
         if self.span == "custom":
             query["from"] = self.from_date or ""
             query["to"] = self.to_date or ""
         return query
+
+    def query_pairs(self) -> list[tuple[str, str | int]]:
+        """Encode the filters the way the revamped ``form.st-filter`` submits them.
+
+        The region and tier groups are checkbox arrays (``region[]`` / ``tier[]``).
+        The tier group is not optional: omit it and vlr.gg applies its own default
+        of VCT alone (the form's ``data-defaults`` say tier=vct), narrowing the
+        ladder to VCT events, so ``all`` sends every tier explicitly.
+
+        Built as an explicit pair list rather than ``urlencode(..., doseq=True)``
+        so that only the array-valued filters can repeat.
+        """
+        tiers = STATS_TIERS if self.tier == "all" else (self.tier,)
+        pairs: list[tuple[str, str | int]] = [
+            ("event_group_id", "all"),
+            ("event_id", self.event_id),
+            ("region[]", self.region),
+            *(("tier[]", tier) for tier in tiers),
+            ("country", "all"),
+            ("span", self.span),
+        ]
+        if self.span == "custom":
+            pairs += [("from", self.from_date or ""), ("to", self.to_date or "")]
+        pairs += [
+            ("side", self.side),
+            ("role", self.role),
+            ("agent", self.agent),
+            ("map_id", self.map_id),
+            ("min_rounds", self.min_rounds),
+            ("min_rating", self.min_rating),
+            ("sort", self.sort),
+            ("dir", self.direction),
+        ]
+        return pairs
 
     def response_metadata(self) -> dict:
         metadata = asdict(self)
@@ -229,9 +278,52 @@ def _normalize_slug(name: str, value: str) -> str:
     return normalized
 
 
+def _normalize_min_rating(value) -> int:
+    """Accept vlr.gg's x1000 integer scale (1550) or the 0-2 rating scale (1.55)."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        _bad_filter("min_rating", value, ", ".join(map(str, sorted(STATS_RATINGS))))
+    if number < 10:
+        number *= 1000
+    rating = int(round(number))
+    # vlr.gg only honours its radio values; anything else silently snaps to 0.
+    if rating not in STATS_RATINGS:
+        _bad_filter(
+            "min_rating",
+            value,
+            ", ".join(map(str, sorted(STATS_RATINGS)))
+            + " (or the same on the 0-2 scale, e.g. 1.55)",
+        )
+    return rating
+
+
+def _normalize_map(map_id: str, map_name: str) -> str:
+    """Merge the numeric ``map_id`` filter with the map-name filter."""
+    map_id = (map_id or "all").lower()
+    if map_id != "all" and not map_id.isdigit():
+        _bad_filter("map_id", map_id, "'all' or a numeric vlr.gg map ID")
+    from_name = validate_stats_map(map_name)
+    if from_name == "all":
+        return map_id
+    if map_id not in ("all", from_name):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Conflicting stats map parameters: map='{map_name}' is map_id "
+                f"'{from_name}' but map_id='{map_id}' was also given"
+            ),
+        )
+    return from_name
+
+
 def normalize_stats_filters(
     region: str,
     timespan: str | None = None,
+    event_id: str | None = None,
+    map_name: str = "all",
+    min_rounds: int = 200,
+    min_rating: int | float = 1550,
     *,
     span: str | None = None,
     from_date: str | None = None,
@@ -241,12 +333,15 @@ def normalize_stats_filters(
     role: str = "all",
     agent: str = "all",
     map_id: str = "all",
-    min_rounds: int = 200,
-    min_rating: int = 1550,
-    sort: str = "rating2",
+    sort: str = DEFAULT_STATS_SORT,
     direction: str = "desc",
 ) -> StatsFilters:
-    """Validate and normalize the public stats filter contract."""
+    """Validate and normalize the public stats filter contract.
+
+    The positional parameters follow the upstream signature (region, timespan,
+    event_id, map name, min_rounds, min_rating); the vlr.gg filter-form options
+    are keyword-only.
+    """
     region = validate_stats_region(region.lower())
     effective_span = _normalize_span(timespan.lower() if timespan else None, span.lower() if span else None)
     from_date, to_date = _normalize_date_range(effective_span, from_date, to_date)
@@ -255,9 +350,15 @@ def normalize_stats_filters(
     side = side.lower()
     role = role.lower()
     sort = sort.lower()
+    sort = _LEGACY_DATA_COLS.get(sort, sort)
     direction = direction.lower()
-    if tier not in STATS_TIERS:
-        _bad_filter("tier", tier, ", ".join(sorted(STATS_TIERS)))
+    if event_id in (None, ""):
+        event_id = "all"
+    event_id = str(event_id)
+    if event_id != "all" and not event_id.isdigit():
+        raise HTTPException(status_code=400, detail="event_id must be a numeric ID")
+    if tier not in STATS_TIER_FILTERS:
+        _bad_filter("tier", tier, ", ".join(sorted(STATS_TIER_FILTERS)))
     if side not in STATS_SIDES:
         _bad_filter("side", side, ", ".join(sorted(STATS_SIDES)))
     if role not in STATS_ROLES:
@@ -268,13 +369,10 @@ def normalize_stats_filters(
         _bad_filter("dir", direction, ", ".join(sorted(STATS_DIRECTIONS)))
     if not 0 <= min_rounds <= 999:
         _bad_filter("min_rounds", min_rounds, "an integer from 0 to 999")
-    if min_rating not in STATS_RATINGS:
-        _bad_filter("min_rating", min_rating, ", ".join(map(str, sorted(STATS_RATINGS))))
+    min_rating = _normalize_min_rating(min_rating)
 
     agent = _normalize_slug("agent", agent)
-    map_id = map_id.lower()
-    if map_id != "all" and not map_id.isdigit():
-        _bad_filter("map_id", map_id, "'all' or a numeric vlr.gg map ID")
+    map_id = _normalize_map(map_id, map_name)
 
     return StatsFilters(
         tier=tier,
@@ -290,6 +388,7 @@ def normalize_stats_filters(
         min_rating=min_rating,
         sort=sort,
         direction=direction,
+        event_id=event_id,
     )
 
 
@@ -316,6 +415,9 @@ def _build_column_map(html) -> dict | None:
         data_col = th.attributes.get("data-col")
         if data_col:
             col_map[data_col] = index
+    for legacy, current in _LEGACY_DATA_COLS.items():
+        if legacy in col_map and current not in col_map:
+            col_map[current] = col_map[legacy]
     return col_map or None
 
 
@@ -409,41 +511,71 @@ def _parse_stats_row(item, col_map: dict | None = None) -> dict:
 
 
 def _selected_region(html) -> str | None:
-    """Return the selected <option> value of ``select[name=region]``.
+    """Return the region vlr.gg actually applied to this response.
 
-    This is the ground truth of which filter vlr.gg actually applied: the page
-    always echoes the applied region as its selected option. Returns ``None`` when
-    the select is absent so callers can skip response validation on markup they do
-    not model.
+    This is the ground truth of which filter the server used. The October 2026
+    revamp replaced the ``<select name="region">`` with a ``form.st-filter``
+    whose regions are ``<input name="region[]">`` checkboxes, so the applied
+    value is now the one carrying ``checked``; a form with nothing ticked means
+    no region restriction ("all"). The legacy select is still read as a
+    fallback. Returns ``None`` when neither shape is present, so callers skip
+    response validation on markup we do not model.
     """
-    select = html.css_first('select[name="region"]')
-    if select is None:
-        return None
-    selected = select.css_first("option[selected]")
-    if selected is None:
-        return None
-    value = selected.attributes.get("value")
-    return value if value is not None else (extract_text_content(selected) or None)
+    return _echoed_filter(html, "region")
 
 
 def _echoed_filter(html, name: str) -> str | None:
-    """Read a filter value echoed by vlr.gg, or None when the control is absent."""
+    """Read a filter value echoed by vlr.gg, or None when the control is absent.
+
+    Current markup (``form.st-filter``): checkbox groups are ``name[]`` arrays
+    whose ticked values were applied (nothing ticked == ``all``); radio groups
+    echo the ``checked`` option; hidden/text inputs echo their ``value``.
+    Pre-revamp markup used ``<select>`` elements and plain inputs.
+    """
+    form = html.css_first("form.st-filter")
+    if form is not None:
+        boxes = form.css(f'input[name="{name}[]"]')
+        if boxes:
+            checked = sorted(
+                box.attributes.get("value") or ""
+                for box in boxes
+                if "checked" in box.attributes
+            )
+            return ",".join(checked) if checked else "all"
+        inputs = form.css(f'input[name="{name}"]')
+        if inputs:
+            if any(node.attributes.get("type") == "radio" for node in inputs):
+                checked = [node for node in inputs if "checked" in node.attributes]
+                return (checked[0].attributes.get("value") or "") if checked else ""
+            return inputs[0].attributes.get("value") or ""
+
     select = html.css_first(f'select[name="{name}"]')
     if select is not None:
         selected = select.css_first("option[selected]")
         if selected is None:
             return None
-        return selected.attributes.get("value", extract_text_content(selected))
+        value = selected.attributes.get("value")
+        return value if value is not None else (extract_text_content(selected) or None)
 
-    input_node = html.css_first(f'input[name="{name}"]')
-    if input_node is not None:
-        return input_node.attributes.get("value", "")
+    if form is None:
+        input_node = html.css_first(f'input[name="{name}"]')
+        if input_node is not None:
+            return input_node.attributes.get("value", "")
     return None
+
+
+# Filters vlr.gg does not echo faithfully: ticking a role pre-ticks every agent of
+# that role, and the event filter is not a form control at all.
+_UNECHOED_FILTERS = frozenset({"agent", "event_id"})
 
 
 def _filter_mismatches(html, filters: StatsFilters) -> dict[str, tuple[str, str]]:
     """Return requested/applied mismatches for controls present in the response."""
-    expected = {str(key): str(value) for key, value in filters.upstream_query().items()}
+    expected = {
+        str(key): str(value)
+        for key, value in filters.upstream_query().items()
+        if key not in _UNECHOED_FILTERS
+    }
     mismatches = {}
     for name, requested in expected.items():
         applied = _echoed_filter(html, name)
@@ -480,6 +612,10 @@ async def _prime_session(client, *, force: bool = False) -> None:
 async def vlr_stats(
     region_key: str,
     timespan: str | None = None,
+    event_id: str | None = None,
+    map_name: str = "all",
+    min_rounds: int = 200,
+    min_rating: int | float = 1550,
     *,
     span: str | None = None,
     from_date: str | None = None,
@@ -489,9 +625,7 @@ async def vlr_stats(
     role: str = "all",
     agent: str = "all",
     map_id: str = "all",
-    min_rounds: int = 200,
-    min_rating: int = 1550,
-    sort: str = "rating2",
+    sort: str = DEFAULT_STATS_SORT,
     direction: str = "desc",
 ):
     # Normalize aliases and every filter BEFORE forming the cache key. The defaults
@@ -500,6 +634,10 @@ async def vlr_stats(
     filters = normalize_stats_filters(
         region_key,
         timespan,
+        event_id,
+        map_name,
+        min_rounds,
+        min_rating,
         span=span,
         from_date=from_date,
         to_date=to_date,
@@ -508,14 +646,12 @@ async def vlr_stats(
         role=role,
         agent=agent,
         map_id=map_id,
-        min_rounds=min_rounds,
-        min_rating=min_rating,
         sort=sort,
         direction=direction,
     )
 
     async def build():
-        url = f"{VLR_STATS_URL}/?{urlencode(filters.upstream_query())}"
+        url = f"{VLR_STATS_URL}/?{urlencode(filters.query_pairs())}"
 
         client = get_http_client()
         await _prime_session(client)

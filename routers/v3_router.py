@@ -113,12 +113,14 @@ async def v3_stats(
     map_id: str = Query("all"),
     min_rounds: int = Query(200, ge=0),
     min_rating: int = Query(1550, ge=0),
-    sort: str = Query("rating2"),
+    event_id: str | None = Query(None, description="Optional numeric event ID"),
+    sort: str = Query("rating"),
     sort_dir: str = Query("desc", alias="dir"),
 ):
     result = await get_stats_data(
         region,
         timespan,
+        event_id,
         span=span,
         from_date=from_date,
         to_date=to_date,
@@ -221,7 +223,7 @@ async def v3_event_matches(event_id: str):
 )
 async def v3_event_stats(
     event_id: str,
-    sort: str = Query("rating2"),
+    sort: str = Query("rating"),
     sort_dir: str = Query("desc", alias="dir"),
     side: str = Query("all"),
     role: str = Query("all"),

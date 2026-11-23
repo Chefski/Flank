@@ -17,6 +17,7 @@ from utils.constants import (
     DEFAULT_RETRIES,
     DEFAULT_TIMEOUT,
     MIN_RESPONSE_SIZE,
+    VLR_BASE_URL,
 )
 from utils.utils import headers
 
@@ -28,6 +29,13 @@ VLR_THEME_COOKIES = {
     "light": "settings=%7B%22dark_mode%22%3A0%7D",
     "dark": "settings=%7B%22dark_mode%22%3A1%7D",
 }
+
+# Log lines must never interpolate the request URL: its path and query carry
+# caller-supplied ids and search terms, so a crafted value could forge a log
+# entry. Every request goes to the same configured origin, so the constant host
+# (taken from the config, not from the URL being fetched) identifies the
+# upstream on its own.
+_UPSTREAM_HOST = urlparse(VLR_BASE_URL).netloc or "upstream"
 
 
 class CircuitOpenError(Exception):
@@ -80,7 +88,7 @@ class CircuitBreaker:
         if count >= self.fail_max:
             self._state[host] = self._OPEN
             self._opened_at[host] = time.monotonic()
-            logger.warning("Circuit opened for %s after %d consecutive failures", host, count)
+            logger.warning("Circuit opened after %d consecutive failures", count)
 
     def reset(self) -> None:
         """Clear all state. Intended for use in tests."""
@@ -90,20 +98,6 @@ class CircuitBreaker:
 
 
 circuit_breaker = CircuitBreaker()
-
-_etags: dict[str, str] = {}
-
-
-def get_stored_etag(url: str) -> str | None:
-    return _etags.get(url)
-
-
-def store_etag(url: str, etag: str) -> None:
-    _etags[url] = etag
-
-
-def clear_etags() -> None:
-    _etags.clear()
 
 
 def _parse_retry_after(response: httpx.Response) -> float | None:
@@ -146,7 +140,6 @@ async def fetch_with_retries(
     timeout: int | float | httpx.Timeout | None = None,
     max_retries: int = DEFAULT_RETRIES,
     request_delay: float = DEFAULT_REQUEST_DELAY,
-    use_etag: bool = False,
     extra_headers: dict[str, str] | None = None,
     record_circuit_outcome: bool = True,
 ) -> httpx.Response:
@@ -156,10 +149,6 @@ async def fetch_with_retries(
     Records a failure against the circuit only after all retries are exhausted.
     429 responses use the Retry-After header for backoff but do not count as
     circuit failures (they indicate rate-limiting, not a service outage).
-
-    When use_etag is True, automatically sends If-None-Match and stores ETag
-    from 200 responses. 304 responses are returned as-is (caller should check
-    response.status_code and serve cached content).
 
     Set ``record_circuit_outcome`` to False for optional requests whose success
     or failure must not alter shared host health. The request still respects an
@@ -175,11 +164,6 @@ async def fetch_with_retries(
     last_response: httpx.Response | None = None
 
     request_headers: dict[str, str] = {}
-    if use_etag:
-        stored = _etags.get(url)
-        if stored is not None:
-            request_headers["If-None-Match"] = stored
-            logger.info("Using stored ETag for %s", url)
     if extra_headers:
         request_headers.update(extra_headers)
 
@@ -193,22 +177,12 @@ async def fetch_with_retries(
                 raise
             logger.warning(
                 "Retrying %s after request error on attempt %d/%d: %s",
-                url, attempt, retries, exc,
+                _UPSTREAM_HOST, attempt, retries, type(exc).__name__,
             )
             await asyncio.sleep(request_delay * (2 ** (attempt - 1)))
             continue
 
         last_response = response
-
-        if use_etag:
-            if response.status_code == 200:
-                etag = response.headers.get("ETag")
-                if etag is not None:
-                    _etags[url] = etag
-            elif response.status_code == 304:
-                if record_circuit_outcome:
-                    circuit_breaker.record_success(url)
-                return response
 
         empty_body = response.status_code == 200 and len(response.content) < MIN_RESPONSE_SIZE
 
@@ -223,7 +197,7 @@ async def fetch_with_retries(
         if empty_body:
             logger.warning(
                 "Retrying %s after empty response body (%d bytes) on attempt %d/%d",
-                url, len(response.content), attempt, retries,
+                _UPSTREAM_HOST, len(response.content), attempt, retries,
             )
             if attempt >= retries:
                 return response
@@ -236,7 +210,7 @@ async def fetch_with_retries(
 
         logger.warning(
             "Retrying %s after upstream status %d on attempt %d/%d (backoff %.1fs)",
-            url, response.status_code, attempt, retries, backoff,
+            _UPSTREAM_HOST, response.status_code, attempt, retries, backoff,
         )
         await asyncio.sleep(backoff)
 
@@ -286,13 +260,15 @@ async def fetch_theme_variants(
         raise light_result
 
     if isinstance(dark_result, Exception):
-        logger.warning("Dark-theme fetch failed for %s: %s", url, dark_result)
+        logger.warning(
+            "Dark-theme fetch from %s failed: %s", _UPSTREAM_HOST, type(dark_result).__name__
+        )
         return light_result, light_result
 
     if dark_result.status_code >= 400 and light_result.status_code < 400:
         logger.warning(
-            "Dark-theme fetch for %s returned status %d; using light fallback",
-            url,
+            "Dark-theme fetch from %s returned status %d; using light fallback",
+            _UPSTREAM_HOST,
             dark_result.status_code,
         )
         return light_result, light_result

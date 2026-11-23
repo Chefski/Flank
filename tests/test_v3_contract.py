@@ -493,3 +493,38 @@ def test_openapi_exposes_concrete_v3_response_schemas():
         for component in v3_objects.values()
     )
     assert schema["info"]["version"] == "3.0.0"
+
+
+def test_match_detail_adapter_maps_the_redesigned_ecm_economy():
+    """vlr.gg's October 2026 ``table.ecm`` rows use wins/attempts per buy state."""
+    detail = adapt_match_detail(
+        {
+            "match_id": "9",
+            "url": "https://www.vlr.gg/9/x",
+            "teams": [{"id": "2131", "name": "Chivas"}, {"id": "11720", "name": "OSK"}],
+            "economy": [
+                {
+                    "Team": "CHV",
+                    "team_id": "2131",
+                    "Pistol": "1/2",
+                    "Conv.": "1/1",
+                    "Bonus": "",
+                    "On Eco <10k: vs. Eco": "",
+                    "On Eco <10k: vs. Full": "1/1",
+                    "On Half buy 10–18k: vs. Full": "",
+                    "On Full buy 18k+: vs. Eco": "3/3",
+                    "On Full buy 18k+: vs. Full": "6/8",
+                }
+            ],
+        }
+    )
+
+    row = detail.economy[0]
+    assert row.team_id == 2131
+    assert row.team_tag == "CHV"
+    assert row.pistol_wins == 1
+    assert row.pistol_win_percent == 50.0
+    assert (row.eco.rounds, row.eco.wins) == (1, 1)
+    assert (row.low.rounds, row.low.wins) == (None, None)
+    assert (row.medium.rounds, row.medium.wins) == (None, None)
+    assert (row.full.rounds, row.full.wins) == (11, 9)

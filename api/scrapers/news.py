@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 from datetime import datetime
 
@@ -24,8 +23,6 @@ from utils.html_parsers import (
     parse_html,
 )
 from utils.http_client import fetch_with_retries, get_http_client
-
-logger = logging.getLogger(__name__)
 
 
 def _iter_children(node):

@@ -10,6 +10,10 @@ VLR_RANKINGS_URL = f"{VLR_BASE_URL}/rankings"
 VLR_STATS_URL = f"{VLR_BASE_URL}/stats"
 VLR_NEWS_URL = f"{VLR_BASE_URL}/news"
 
+# Entity URL prefixes — scrapers append the id and any query string
+VLR_PLAYER_URL = f"{VLR_BASE_URL}/player"
+VLR_TEAM_URL = f"{VLR_BASE_URL}/team"
+
 # API Settings
 API_TITLE = "vlrggapi"
 API_DESCRIPTION = (
@@ -19,9 +23,10 @@ API_DESCRIPTION = (
 )
 API_PORT = 3001
 
-# Pagination limits
-MAX_PAGE_LIMIT = 100
-MIN_PAGE_LIMIT = 1
+# Single runtime source of truth for the API version. Packaging declares its own
+# copy in pyproject.toml (which is not copied into the Docker image);
+# tests/test_version_consistency.py fails if the two ever drift apart.
+API_VERSION = "3.0.0"
 
 # Request settings
 DEFAULT_TIMEOUT = 30
@@ -68,6 +73,8 @@ CACHE_TTL_TEAM = 1800
 CACHE_TTL_TEAM_MATCHES = 600
 CACHE_TTL_TEAM_TRANSACTIONS = 3600
 CACHE_TTL_TEAM_STATS = 600
+CACHE_TTL_TEAM_ROSTER = 1800
+CACHE_TTL_TEAM_SCHEDULE = 300
 CACHE_TTL_EVENT_MATCHES = 600
 CACHE_TTL_EVENT_STATS = 600
 CACHE_TTL_EVENT_AGENTS = 1800
@@ -77,7 +84,34 @@ CACHE_TTL_HEALTH_UPSTREAM = 60
 
 # /stats region vocabulary
 # The /stats page uses a DIFFERENT region taxonomy from /rankings. vlr.gg's
-# <select name="region"> offers exactly these canonical values; any other value
-# silently falls back to "all". Kept separate from utils.utils.region (the
-# /rankings contract) so /rankings?region=americas still returns 400.
+# filter form submits exactly these canonical values (as ``region[]`` checkboxes
+# since the October 2026 revamp); any other value silently falls back to "all".
+# Kept separate from utils.utils.region (the /rankings contract) so
+# /rankings?region=americas still returns 400.
 STATS_REGIONS = frozenset({"all", "americas", "emea", "pacific", "china", "intl"})
+
+# The /stats ``tier[]`` checkboxes in the order the page renders them. When the
+# request omits the group, vlr.gg applies its own default of VCT alone (the form
+# carries ``data-defaults`` tier=vct and only the vct box comes back checked),
+# which silently narrows the ladder to VCT events. Every value is sent so the
+# scope stays what the pre-revamp page returned.
+STATS_TIERS = ("vct", "vcl", "t3", "gc", "cg", "off")
+
+# /stats filters by vlr.gg's internal numeric map_id, not by map name. These ids
+# come from the <select name="map_id"> on the stats page itself; callers pass a
+# map name (or "all") and the scraper translates it.
+STATS_MAP_IDS = {
+    "ascent": "5",
+    "bind": "1",
+    "breeze": "8",
+    "corrode": "14",
+    "fracture": "9",
+    "haven": "2",
+    "icebox": "6",
+    "lotus": "11",
+    "pearl": "10",
+    "split": "3",
+    "summit": "16",
+    "sunset": "12",
+    "abyss": "13",
+}

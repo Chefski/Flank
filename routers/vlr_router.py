@@ -14,6 +14,7 @@ from routers.shared_handlers import (
     get_health_data,
     get_match_data,
     get_match_detail_data,
+    get_match_logs_data,
     get_news_article_data,
     get_news_data,
     get_player_data,
@@ -22,6 +23,8 @@ from routers.shared_handlers import (
     get_stats_data,
     get_team_data,
     get_team_matches_data,
+    get_team_roster_data,
+    get_team_schedule_data,
     get_team_transactions_data,
     to_legacy_rankings_shape,
 )
@@ -86,14 +89,16 @@ async def VLR_stats(
     span: str | None = Query(None, description="VLR span: 30d, 60d, 90d, custom, a year from 2020 onward, or all"),
     from_date: str | None = Query(None, alias="from", description="Custom span start date (YYYY-MM-DD)"),
     to_date: str | None = Query(None, alias="to", description="Custom span end date (YYYY-MM-DD)"),
+    event_id: str | None = Query(None, description="Optional numeric event ID to filter stats by event"),
+    map_name: str = Query("all", alias="map", description="Map name filter (alternative to map_id)"),
     tier: str = Query("all", description="Tier: all, vct, vcl, t3, gc, cg, or off"),
     side: str = Query("all", description="Side: all, t, or ct"),
     role: str = Query("all", description="Role filter"),
     agent: str = Query("all", description="Agent slug or all"),
     map_id: str = Query("all", description="VLR map ID or all"),
     min_rounds: int = Query(200, description="Minimum rounds (historical API default: 200)"),
-    min_rating: int = Query(1550, description="Minimum rating threshold (historical API default: 1550)"),
-    sort: str = Query("rating2", description="VLR data-col to sort by"),
+    min_rating: float = Query(1550, description="Minimum rating threshold (historical API default: 1550; 0-2 scale accepted)"),
+    sort: str = Query("rating", description="VLR data-col to sort by"),
     sort_dir: str = Query("desc", alias="dir", description="Sort direction: asc or desc"),
 ):
     """
@@ -110,6 +115,10 @@ async def VLR_stats(
     return await get_stats_data(
         region,
         timespan,
+        event_id,
+        map_name,
+        min_rounds,
+        min_rating,
         span=span,
         from_date=from_date,
         to_date=to_date,
@@ -118,8 +127,6 @@ async def VLR_stats(
         role=role,
         agent=agent,
         map_id=map_id,
-        min_rounds=min_rounds,
-        min_rating=min_rating,
         sort=sort,
         direction=sort_dir,
     )
@@ -142,7 +149,7 @@ async def VLR_ranks(
         "oce": "oceania",\n
         "kr": "korea",\n
         "mn": "mena",\n
-        "gc": "game-changers",\n
+        "gc": "gc",\n
         "br": "Brazil",\n
         "cn": "china",\n
         "jp": "japan",\n
@@ -190,7 +197,7 @@ async def VLR_events(
         None,
         description="Event type filter",
         examples=["completed"],
-        enum=["upcoming", "completed", "live"]
+        json_schema_extra={"enum": ["upcoming", "completed", "live"]}
     ),
     page: int = Query(
         1,
@@ -213,6 +220,18 @@ async def VLR_match_detail(
     """Get detailed match data including per-map stats, rounds, and head-to-head."""
     validate_id_param(match_id, "match_id")
     return _strip_match_team_ids(await get_match_detail_data(match_id))
+
+
+@router.get("/match/logs")
+async def VLR_match_logs(
+    match_id: str = Query(..., description="VLR.GG match ID"),
+    game_id: str = Query(None, description="Optional game (map) ID; defaults to the first played map"),
+):
+    """Get the per-round 2D replay of one map — results, buys, kills and positions."""
+    validate_id_param(match_id, "match_id")
+    if game_id is not None:
+        validate_id_param(game_id, "game_id")
+    return await get_match_logs_data(match_id, game_id)
 
 
 @router.get("/player")
@@ -264,6 +283,24 @@ async def VLR_team_transactions(
     return await get_team_transactions_data(id)
 
 
+@router.get("/team/roster")
+async def VLR_team_roster(
+    id: str = Query(..., description="VLR.GG team ID"),
+):
+    """Get grouped roster with active, staff, former, and benched players."""
+    validate_id_param(id)
+    return await get_team_roster_data(id)
+
+
+@router.get("/team/schedule")
+async def VLR_team_schedule(
+    id: str = Query(..., description="VLR.GG team ID"),
+):
+    """Get upcoming match schedule for a team."""
+    validate_id_param(id)
+    return await get_team_schedule_data(id)
+
+
 @router.get("/events/matches")
 async def VLR_event_matches(
     event_id: str = Query(..., description="VLR.GG event ID"),
@@ -286,7 +323,7 @@ async def VLR_event_detail(
 @router.get("/event/{event_id}/stats")
 async def VLR_event_stats(
     event_id: str,
-    sort: str = Query("rating2"),
+    sort: str = Query("rating"),
     sort_dir: str = Query("desc", alias="dir"),
     side: str = Query("all"),
     role: str = Query("all"),

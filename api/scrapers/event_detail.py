@@ -399,6 +399,26 @@ def _parse_event_brackets(html: HTMLParser) -> list[dict]:
         if rounds:
             brackets.append({"type": bracket_type, "rounds": rounds})
     return brackets
+def _parse_event_stages(html: HTMLParser) -> list[dict]:
+    """Parse the stage tabs (.wf-subnav) of an event page.
+
+    Each tab links to /event/{id}/{event-slug}/{stage-slug}. Single-stage
+    events have no tabs and return [].
+    """
+    stages: list[dict] = []
+    for item in html.css(".wf-subnav a.wf-subnav-item"):
+        parts = item.attributes.get("href", "").strip("/").split("/")
+        if len(parts) != 4 or parts[0] != "event":
+            continue
+        title = item.css_first(".wf-subnav-item-title")
+        dates = item.css_first(".ge-text-light")
+        stages.append({
+            "name": extract_text_content(title),
+            "slug": parts[3],
+            "dates": extract_text_content(dates),
+            "active": "mod-active" in item.attributes.get("class", ""),
+        })
+    return stages
 
 
 def _parse_prizes(html: HTMLParser) -> list[dict]:
@@ -465,6 +485,32 @@ def _parse_prizes(html: HTMLParser) -> list[dict]:
     return prizes
 
 
+def _qualifier_event_id(href: str) -> str:
+    """Event id from a qualification note's link, or "" when it is not usable.
+
+    Notes point at a relative ``/event/<id>/<slug>`` path or an absolute vlr.gg
+    URL. Another host, a non-event route or an unparseable href yields "" so a
+    malformed note can never fail the surrounding event parse.
+    """
+    if not href:
+        return ""
+    if "://" in href:
+        try:
+            parts = urlparse(href)
+        except ValueError:
+            return ""
+        host = (parts.hostname or "").lower()
+        if host and host != "vlr.gg" and not host.endswith(".vlr.gg"):
+            return ""
+        path = parts.path
+    else:
+        path = href
+    if not path.strip("/").startswith("event/"):
+        return ""
+    event_id, _ = parse_href_id_slug(path)
+    return event_id if event_id.isdigit() else ""
+
+
 def _parse_event_teams(html: HTMLParser) -> list[dict]:
     """Parse participating teams from event-team cards."""
     teams: list[dict] = []
@@ -504,15 +550,18 @@ def _parse_event_teams(html: HTMLParser) -> list[dict]:
                 )
             players.append({"id": p_id, "name": p_name, "flag": flag})
 
-        # Qualification note
+        # Qualification note; its link also names the qualifier event the team
+        # came through, which is useful for walking backwards through a circuit.
         note = ""
         note_url = ""
+        note_event_id = ""
         note_elem = card.css_first(".event-team-note")
         if note_elem:
             note_link = note_elem.css_first("a")
             if note_link:
                 note = extract_text_content(note_link)
                 note_url = build_full_url(note_link.attributes.get("href", ""))
+                note_event_id = _qualifier_event_id(note_link.attributes.get("href", "") or "")
 
         teams.append({
             "id": team_id,
@@ -522,6 +571,7 @@ def _parse_event_teams(html: HTMLParser) -> list[dict]:
             "players": players,
             "qualification": note,
             "qualification_url": note_url,
+            "qualification_event_id": note_event_id,
         })
         id_mapper.register_team(team_name, team_id)
 
@@ -579,7 +629,66 @@ def _parse_standings(html: HTMLParser) -> list[dict]:
                     row_data[label] = extract_text_content(cell)
             rows.append(row_data)
 
-        standings.append({"stage": stage, "columns": headers, "rows": rows})
+        standings.append({"stage": stage, "group": "", "columns": headers, "rows": rows})
+
+    standings.extend(_parse_group_tables(html))
+    return standings
+
+
+def _preceding_label(node, max_depth: int = 4) -> str:
+    """Text of the nearest .wf-label before ``node`` (checking up to ``max_depth`` ancestors)."""
+    current = node
+    for _ in range(max_depth):
+        sibling = current.prev
+        while sibling is not None:
+            if sibling.tag and "wf-label" in (sibling.attributes.get("class") or ""):
+                return extract_text_content(sibling)
+            sibling = sibling.prev
+        current = current.parent
+        if current is None:
+            break
+    return ""
+
+
+def _parse_group_tables(html: HTMLParser) -> list[dict]:
+    """Parse group / round-robin standings (table.wf-table.mod-group).
+
+    Each table sits under a stage label ("Round Robin", "Group Stage"); a
+    multi-group stage names the group in the table's th.mod-title.
+    """
+    standings: list[dict] = []
+
+    for table in html.css("table.wf-table.mod-group"):
+        header_cells = table.css("thead th")
+        if not header_cells:
+            continue
+        group = extract_text_content(header_cells[0])
+        # The title th spans the logo and team columns
+        columns = ["Team"] + [extract_text_content(th) for th in header_cells[1:]]
+
+        rows: list[dict[str, str]] = []
+        for tr in table.css("tbody tr"):
+            team_link = tr.css_first("a.event-group-team")
+            if not team_link:
+                continue
+            name_elem = team_link.css_first(".event-group-team-name") or team_link
+            team_name = extract_text_content(name_elem)
+            region_elem = name_elem.css_first(".event-group-team-region")
+            if region_elem:
+                team_name = team_name.replace(extract_text_content(region_elem), "").strip()
+
+            cells = tr.css("td")[2:]  # skip the logo and team cells
+            row_data = {"Team": team_name}
+            for label, cell in zip(columns[1:], cells, strict=False):
+                row_data[label] = extract_text_content(cell)
+            rows.append(row_data)
+
+        standings.append({
+            "stage": _preceding_label(table),
+            "group": group,
+            "columns": columns,
+            "rows": rows,
+        })
 
     return standings
 
@@ -607,6 +716,15 @@ async def vlr_event_detail(event_id: str, stage: str | None = None) -> dict:
 
         html = parse_html(resp.text)
 
+        resources, stages = _parse_event_navigation(html)
+        # An unknown stage slug silently serves the default stage
+        if stage and not any(s["slug"] == stage and s["active"] for s in stages):
+            available = ", ".join(s["slug"] for s in stages) or "none"
+            raise HTTPException(
+                status_code=404,
+                detail=f"Stage '{stage}' not found for event {event_id}. Available stages: {available}",
+            )
+
         header = _parse_event_header(html)
         header.update(
             {
@@ -618,18 +736,9 @@ async def vlr_event_detail(event_id: str, stage: str | None = None) -> dict:
         prizes = _parse_prizes(html)
         teams = _parse_event_teams(html)
         standings = _parse_standings(html)
-        resources, stages = _parse_event_navigation(html)
         groups = _parse_event_groups(html)
         brackets = _parse_event_brackets(html)
         active_stage = next((item for item in stages if item["active"]), None)
-        if stage and (active_stage is None or active_stage["slug"] != stage):
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Invalid event stage '{stage}' for event {event_id}. "
-                    "Use a stage slug returned by the event endpoint."
-                ),
-            )
         id_mapper.register_event(header["name"], event_id)
 
         data = {
@@ -637,11 +746,11 @@ async def vlr_event_detail(event_id: str, stage: str | None = None) -> dict:
                 "status": status,
                 "segments": {
                     "event": header,
+                    "stages": stages,
                     "prizes": prizes,
                     "teams": teams,
                     "standings": standings,
                     "resources": resources,
-                    "stages": stages,
                     "active_stage": active_stage,
                     "groups": groups,
                     "brackets": brackets,
@@ -651,5 +760,5 @@ async def vlr_event_detail(event_id: str, stage: str | None = None) -> dict:
         return data
 
     return await cache_manager.get_or_create_async(
-        CACHE_TTL_EVENTS, build, "event_detail", event_id, stage
+        CACHE_TTL_EVENTS, build, "event_detail", event_id, stage or ""
     )

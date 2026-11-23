@@ -1,410 +1,454 @@
+"""Tests for the event scrapers: /event/matches list and /event detail pages.
+
+Fixtures are trimmed from real vlr.gg markup (Valorant Champions 2026,
+event 2766, fetched 2026-09-30 17:44 UTC, rendered in CEST).
+"""
+from datetime import UTC, datetime
+
 import pytest
 from fastapi import HTTPException
-from selectolax.parser import HTMLParser
 
-import api.scrapers.event_detail as detail_mod
-import api.scrapers.event_resources as resources_mod
+import api.scrapers.events as events_module
 from api.scrapers.event_detail import (
-    _parse_bracket_match,
-    _parse_calendar_links,
-    _parse_event_brackets,
-    _parse_event_groups,
-    _parse_event_header,
-    _parse_event_navigation,
+    _parse_event_stages,
     _parse_event_teams,
     _parse_prizes,
-    validate_event_stage,
+    _parse_standings,
+    _qualifier_event_id,
     vlr_event_detail,
 )
-from api.scrapers.event_resources import (
-    _event_filter_mismatches,
-    _parse_agent_compositions,
-    _parse_agent_pick_rates,
-    _parse_event_news,
-    _parse_pickem,
-    _parse_stage_filters,
-    normalize_event_stats_filters,
-    normalize_excluded_series,
-    vlr_event_agents,
-    vlr_event_news,
-    vlr_event_pickem,
-    vlr_event_stats,
-)
+from api.scrapers.events import _event_match_utc_offset, vlr_event_matches
 from utils.cache_manager import cache_manager
-
-DETAIL_HTML = """
-<html><body>
-  <div class="event-header">
-    <div class="event-header-thumb"><img src="//cdn.test/event.png"></div>
-    <div class="event-header-main">
-      <div class="event-header-main-bc">
-        <a href="/vct">Valorant Champions Tour 2026</a>
-        <a href="/vct/?stage=16">Stage 2</a>
-        <a href="/vct/?region=24">China</a>
-      </div>
-      <h1 class="event-header-main-title">VCT 2026: China Stage 2</h1>
-      <h2 class="event-header-main-desc">Official circuit event.</h2>
-      <div class="event-header-addcal"><div class="zx-menu">
-        <a href="https://calendar.google.test">Google Calendar</a>
-        <a href="webcal://calendar.test/event/9">Apple Calendar</a>
-        <a href="#" data-copy="https://calendar.test/event/9">Copy link</a>
-        <a href="/event/ical/9">Download .ics</a>
-      </div></div>
-      <div class="event-header-main-meta">
-        <div><div class="label">Dates</div><div class="value">Jul 9 – Aug 23, 2026</div></div>
-        <div><div class="label">Prize</div><div class="value">$250,000</div></div>
-        <div><div class="label">Location</div><div class="value"><i class="flag mod-cn"></i>China</div></div>
-      </div>
-    </div>
-  </div>
-  <div class="wf-nav">
-    <a class="wf-nav-item mod-active" href="/event/9/test"><div class="wf-nav-item-title">Overview</div></a>
-    <a class="wf-nav-item" href="/event/matches/9/test"><div class="wf-nav-item-title">Matches <sup>(12)</sup></div></a>
-    <a class="wf-nav-item" href="/event/stats/9/test"><div class="wf-nav-item-title">Stats</div></a>
-  </div>
-  <div class="wf-subnav">
-    <a class="wf-subnav-item mod-active" href="/event/9/test/group-stage">
-      <div class="ge-text-light">Jul 9–26</div><div class="wf-subnav-item-title">Group Stage</div>
-    </a>
-    <a class="wf-subnav-item" href="/event/9/test/playoffs">
-      <div class="ge-text-light">Aug 14–23</div><div class="wf-subnav-item-title">Playoffs</div>
-    </a>
-  </div>
-  <a class="wf-card mod-dark"><span>not the prize table</span></a>
-  <div class="wf-card mod-dark"><div class="wf-ptable">
-    <div class="row"><div class="cell">Place</div><div class="cell">Prize</div><div class="cell">Team</div></div>
-    <div class="row"><div class="cell">1st</div><div class="cell">$100,000</div><div class="cell">
-      <a href="/team/10/winners"><img src="//cdn.test/team.png"><div class="text-of">Winners<div class="ge-text-light">China</div></div></a>
-    </div></div>
-  </div></div>
-  <div class="event-group">
-    <div class="event-group-block"><table><thead><tr><th class="mod-title">Group Alpha</th></tr></thead><tbody>
-      <tr class="mod-first mod-adv">
-        <td><img class="event-group-team-logo" src="//cdn.test/team.png"></td>
-        <td><a class="event-group-team" href="/team/10/winners"><div class="event-group-team-name">Winners<div class="event-group-team-region">China</div></div></a></td>
-        <td class="mod-stat">5–0</td><td class="mod-stat">10/2</td><td class="mod-stat">150/120</td><td class="mod-stat"><span>+30</span></td>
-      </tr>
-    </tbody></table></div>
-    <div class="group-expand-btn" data-group-id="44"></div>
-    <a class="event-group-series-match" href="/777/winners-vs-losers">
-      <div><b>Jul 10</b><br>9:00 am</div>
-      <div class="team mod-winner"><div class="team-name">WIN</div><img src="//cdn.test/team.png"></div>
-      <div class="score"><div class="score-left">2</div><div class="score-right">0</div></div>
-      <div class="team mod-loser"><div class="team-name">LOS</div></div>
-      <span class="ss-name mod-full">Week 1</span><span>Bo3</span>
-    </a>
-  </div>
-  <div class="bracket-container mod-upper">
-    <div class="bracket-col"><div class="bracket-col-label">Upper Final</div>
-      <a class="bracket-item" href="/888/final" title="Winners vs. Losers">
-        <div class="bracket-item-team mod-first mod-winner" data-team-id="10"><div class="bracket-item-team-name"><span>Winners</span></div><div class="bracket-item-team-score">3</div></div>
-        <div class="bracket-item-team" data-team-id="20"><div class="bracket-item-team-name"><span>Losers</span></div><div class="bracket-item-team-score">1</div></div>
-        <div class="bracket-item-status" data-utc-ts="1786003200"><span>9:00 am</span><i class="fa fa-video-camera"></i></div>
-      </a>
-    </div>
-  </div>
-  <div class="wf-card event-team">
-    <a class="event-team-name" href="/team/10/winners">Winners</a>
-    <img class="event-team-players-mask-team" src="//cdn.test/team.png">
-    <div class="event-team-players">
-      <span class="event-team-players-item">&nbsp;</span>
-      <a class="event-team-players-item" href="/player/100/ace"><i class="flag mod-us"></i>Ace</a>
-    </div>
-    <div class="event-team-note"><a href="/event/9/test/group-stage">Group Stage (#1)</a></div>
-  </div>
-</body></html>
-"""
-
-
-STATS_HTML = """
-<html><body>
-  <input type="hidden" name="sort" value="rating2">
-  <input type="hidden" name="dir" value="desc">
-  <select name="side"><option value="ct" selected>Defense</option></select>
-  <select name="role"><option value="all" selected>All roles</option></select>
-  <select name="agent"><option value="all" selected>All agents</option></select>
-  <select name="map_id"><option value="all" selected>All maps</option></select>
-  <input name="min_rounds" value="0">
-  <input type="hidden" name="exclude" value="551">
-  <div class="st-ss-group"><div class="st-ss-lbl"><span>Group Stage</span><a data-series-id="55"></a></div>
-    <label><input class="st-ss" value="551" checked><span>Week 1</span></label>
-    <label><input class="st-ss" value="552"><span>Week 2</span></label>
-  </div>
-  <table><thead><tr>
-    <th>Player</th><th data-col="agents">Agents</th><th data-col="rnd">Rnd</th>
-    <th data-col="rating2">R</th><th data-col="acs">ACS</th><th data-col="kd">KD</th>
-    <th data-col="adr">ADR</th><th data-col="kmax">KMAX</th>
-  </tr></thead><tbody><tr>
-    <td class="mod-player"><a href="/player/100/ace"><i class="flag mod-us"></i><div class="text-of">Ace</div><div class="st-pl-country">WIN</div></a></td>
-    <td class="mod-agents"><span class="st-agent"><img src="/img/vlr/game/agents/jett.png"><span class="st-agent-n">100%</span></span></td>
-    <td>200</td><td>1.25</td><td>250</td><td>1.40</td><td>170</td>
-    <td><a href="/888/final/?game=999">31</a></td>
-  </tr></tbody></table>
-</body></html>
-"""
-
-
-AGENTS_HTML = """
-<html><body><form>
-  <input type="hidden" name="exclude" value="552">
-  <div><div><div class="wf-label">Group Stage</div><a class="group-tag-btn" data-series-id="55"></a></div>
-    <div><div class="wf-tag-btn" data-subseries-id="551">Week 1</div><div class="wf-tag-btn mod-unselected" data-subseries-id="552">Week 2</div></div>
-  </div>
-</form>
-<table class="wf-table mod-pr-global">
-  <tr><th>Map</th><th>#</th><th>ATK</th><th>DEF</th><th><img src="/img/vlr/game/agents/jett.png"></th><th><img src="/img/vlr/game/agents/omen.png"></th></tr>
-  <tr class="pr-global-row mod-all"><td></td><td>10</td><td>55%</td><td>45%</td><td>70%</td><td>30%</td></tr>
-  <tr class="pr-global-row"><td><span class="map-pseudo-icon">A</span>Ascent</td><td>4</td><td>60%</td><td>40%</td><td>100%</td><td>0%</td></tr>
-</table>
-<div class="pr-matrix-map"><table class="wf-table">
-  <tr><th><span class="map-pseudo-icon">A</span>Ascent</th><th></th><th><img src="/img/vlr/game/agents/jett.png"></th><th><img src="/img/vlr/game/agents/omen.png"></th></tr>
-  <tr class="pr-matrix-row"><td><a href="/team/10/winners"><img src="//cdn.test/team.png"><span class="text-of">Winners</span></a></td><td></td><td class="mod-picked"></td><td></td></tr>
-  <tr class="pr-matrix-row mod-dropdown"><td><a href="/888/final">Match</a></td><td></td><td class="mod-picked"></td><td></td></tr>
-</table></div>
-</body></html>
-"""
-
-
-NEWS_HTML = """
-<html><body><div class="wf-card">
-  <a class="wf-module-item" href="/123/event-story" title="Event story"><div class="ge-text-light">2026/07/27</div>Event story</a>
-  <a class="wf-module-item" href="/team/10/winners" title="Not news"><div>Winners</div></a>
-</div></body></html>
-"""
-
-
-PICKEM_HTML = """
-<html><body>
-  <div class="pickem-subseries-container">
-    <div class="wf-label mod-large">Group Stage: Week 1</div>
-    <div class="pi-match-item">
-      <div class="pi-match-item-team" data-team-id="10"><img src="//cdn.test/team.png"><div class="pi-match-item-name">Winners</div></div>
-      <div class="pi-match-item-team mod-false" data-team-id="20"><div class="pi-match-item-name">Losers</div></div>
-      <input name="subseries-item-id-winner-500" value="">
-    </div>
-    <div>Picks are locked.</div>
-  </div>
-  <a href="/event/pickemgroup/9/test">Group</a>
-  <div class="event-sidebar mod-leaderboard">
-    <a href="/event/leaderboard/9/test">Top Pick'ems</a>
-    <div class="wf-card"><div>125 points</div><div class="ge-text-light">10% / 5 users</div></div>
-  </div>
-</body></html>
-"""
+from utils.html_parsers import parse_html
 
 
 class FakeResponse:
-    def __init__(self, text, status_code=200):
-        self.text = text
+    def __init__(self, status_code: int, text: str = "<html></html>"):
         self.status_code = status_code
-        self.content = text.encode()
-        self.headers = {}
+        self.text = text
+        self.content = text.encode("utf-8")
+        self.headers: dict = {}
 
 
-@pytest.fixture(autouse=True)
-def clear_caches():
+class FakeAsyncClient:
+    def __init__(self, responses: dict[str, FakeResponse]):
+        self.responses = responses
+        self.calls: list[str] = []
+
+    async def get(self, url: str, timeout=None, headers=None):
+        self.calls.append(url)
+        return self.responses[url]
+
+
+def _match_item(href, time, team1, team2, ml_class, status, eta, series, stage):
+    return f"""
+    <a href="{href}" class="wf-module-item match-item mod-color">
+        <div class="match-item-time">
+            {time}
+        </div>
+        <div class="match-item-vs">
+            <div class="match-item-vs-team ">
+                <div class="match-item-vs-team-name"><div class="text-of"><span class="flag mod-eu"></span>{team1}</div></div>
+                <div class="match-item-vs-team-score sp-mask mod-dash">&ndash;</div>
+            </div>
+            <div class="match-item-vs-team ">
+                <div class="match-item-vs-team-name"><div class="text-of"><span class="flag mod-sg"></span>{team2}</div></div>
+                <div class="match-item-vs-team-score sp-mask mod-dash">&ndash;</div>
+            </div>
+        </div>
+        <div class="match-item-eta">
+            <div class="{ml_class}">
+                <div class="ml-status">{status}</div>
+                <div class="ml-eta{' mod-completed' if 'mod-completed' in ml_class else ''}">{eta}</div>
+            </div>
+        </div>
+        <div class="match-item-note"></div>
+        <div class="match-item-event text-of">
+            <div class="match-item-event-series text-of">
+                {series}
+            </div>
+            {stage}
+        </div>
+    </a>"""
+
+
+EVENT_MATCHES_HTML = f"""
+<html><body>
+<div class="wf-label mod-large">
+    Wed, September 30, 2026
+    <span class="wf-tag" style="vertical-align: -3px; margin-left: 4px;">Today</span>
+</div>
+<div class="wf-card">
+    {_match_item("/753448/team-vitality-vs-loud-valorant-champions-2026-winners-b", "11:00 AM",
+                 "Team Vitality", "LOUD", "ml mod-completed", "Completed", "8h 45m", "Winner's (B)", "Group Stage")}
+</div>
+<div class="wf-label mod-large">
+    Thu, October 1, 2026
+</div>
+<div class="wf-card">
+    {_match_item("/753457/tyloo-vs-team-liquid-valorant-champions-2026-elim-c", "11:00 AM",
+                 "TYLOO", "Team Liquid", "ml", "Upcoming", "15h 15m", "Elimination (C)", "Group Stage")}
+</div>
+<div class="wf-label mod-large">
+    Sun, October 18, 2026
+</div>
+<div class="wf-card">
+    {_match_item("/753480/tbd-vs-tbd-valorant-champions-2026-gf", "8:00 AM",
+                 "TBD", "TBD", "ml", "Upcoming", "2w 3d", "Grand Final", "Playoffs")}
+</div>
+</body></html>
+"""
+
+FETCHED_AT = datetime(2026, 9, 30, 17, 44, 25, tzinfo=UTC)
+
+
+class _FrozenDatetime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return FETCHED_AT if tz is None else FETCHED_AT.astimezone(tz)
+
+
+@pytest.mark.anyio
+async def test_vlr_event_matches_emits_stage_time_and_utc_timestamp(monkeypatch):
     cache_manager.clear_all()
-    yield
+    client = FakeAsyncClient({"https://www.vlr.gg/event/matches/2766": FakeResponse(200, EVENT_MATCHES_HTML)})
+    monkeypatch.setattr("api.scrapers.events.get_http_client", lambda: client)
+    monkeypatch.setattr(events_module, "datetime", _FrozenDatetime)
+
+    result = await vlr_event_matches("2766")
+    rows = result["data"]["segments"]
+
+    assert [r["date"] for r in rows] == [
+        "Wed, September 30, 2026",
+        "Thu, October 1, 2026",
+        "Sun, October 18, 2026",
+    ]
+    assert [r["stage"] for r in rows] == ["Group Stage", "Group Stage", "Playoffs"]
+    assert [r["event_series"] for r in rows] == ["Winner's (B)", "Elimination (C)", "Grand Final"]
+    assert [r["time"] for r in rows] == ["11:00 AM", "11:00 AM", "8:00 AM"]
+    # Page rendered in CEST (UTC+2): the countdowns pin the offset, which then
+    # applies to every row, including the one with a day-precision countdown
+    assert [r["unix_timestamp"] for r in rows] == [
+        "2026-09-30 09:00:00",
+        "2026-10-01 09:00:00",
+        "2026-10-18 06:00:00",
+    ]
     cache_manager.clear_all()
 
 
-def test_event_overview_parsers_cover_current_site_surfaces():
-    html = HTMLParser(DETAIL_HTML)
-    header = _parse_event_header(html)
-    resources, stages = _parse_event_navigation(html)
-    groups = _parse_event_groups(html)
-    brackets = _parse_event_brackets(html)
+@pytest.mark.anyio
+async def test_vlr_event_matches_leaves_timestamp_empty_without_a_minute_countdown(monkeypatch):
+    cache_manager.clear_all()
+    html = EVENT_MATCHES_HTML.replace("8h 45m", "1w 2d").replace("15h 15m", "1d 3h")
+    client = FakeAsyncClient({"https://www.vlr.gg/event/matches/2766": FakeResponse(200, html)})
+    monkeypatch.setattr("api.scrapers.events.get_http_client", lambda: client)
+    monkeypatch.setattr(events_module, "datetime", _FrozenDatetime)
 
-    assert header["name"] == "VCT 2026: China Stage 2"
-    assert header["series"] == "Valorant Champions Tour 2026"
-    assert header["series_links"][1]["query"] == {"stage": "16"}
-    assert header["location_code"] == "cn"
-    assert _parse_calendar_links(html)["subscription"] == "https://calendar.test/event/9"
-    assert resources[1] == {
-        "name": "Matches",
-        "count": "12",
-        "url": "https://www.vlr.gg/event/matches/9/test",
-        "active": False,
-    }
-    assert stages[0]["slug"] == "group-stage"
-    assert stages[0]["active"] is True
-    assert groups[0]["id"] == "44"
-    assert groups[0]["teams"][0]["record"] == "5–0"
-    assert groups[0]["teams"][0]["state"] == "advanced"
-    assert groups[0]["matches"][0]["match_id"] == "777"
-    assert brackets[0]["type"] == "upper"
-    assert brackets[0]["rounds"][0]["matches"][0]["utc_timestamp"] == "1786003200"
+    result = await vlr_event_matches("2766")
+    rows = result["data"]["segments"]
+
+    assert [r["unix_timestamp"] for r in rows] == ["", "", ""]
+    assert [r["time"] for r in rows] == ["11:00 AM", "11:00 AM", "8:00 AM"]
+    cache_manager.clear_all()
 
 
-def test_prizes_skip_earlier_dark_cards_and_teams_skip_placeholders():
-    html = HTMLParser(DETAIL_HTML)
-
-    assert _parse_prizes(html)[0]["team"]["id"] == "10"
-    team = _parse_event_teams(html)[0]
-    assert team["logo"] == "https://cdn.test/team.png"
-    assert team["players"] == [{"id": "100", "name": "Ace", "flag": "us"}]
-    assert team["qualification_url"].endswith("/event/9/test/group-stage")
-
-
-def test_bracket_match_handles_tbd_slots():
-    item = HTMLParser('<a class="bracket-item" href="/1/tbd"><div class="bracket-item-team"></div></a>').css_first("a")
-    parsed = _parse_bracket_match(item)
-    assert parsed["team1"]["name"] == "TBD"
-    assert parsed["team2"]["name"] == "TBD"
+def test_event_match_utc_offset_handles_negative_offsets():
+    # A page rendered in US Pacific (UTC-7): 2:00 AM local, starting in 1h 30m
+    now = datetime(2026, 9, 30, 7, 30, tzinfo=UTC)
+    local = datetime(2026, 9, 30, 2, 0)
+    offset = _event_match_utc_offset([(local, "1h 30m", 1)], now)
+    assert offset is not None
+    assert offset.total_seconds() == -7 * 3600
 
 
-@pytest.mark.parametrize("stage", ["group-stage", "playoffs", "stage-2"])
-def test_validate_event_stage_accepts_safe_slug(stage):
-    assert validate_event_stage(stage) == stage
-
-
-@pytest.mark.parametrize("stage", ["../stats", "stage?x=1", "stage one"])
-def test_validate_event_stage_rejects_unsafe_slug(stage):
-    with pytest.raises(HTTPException) as exc:
-        validate_event_stage(stage)
-    assert exc.value.status_code == 400
-
-
-def test_event_resource_parsers():
-    stats_html = HTMLParser(STATS_HTML)
-    agents_html = HTMLParser(AGENTS_HTML)
-
-    assert _parse_stage_filters(stats_html)[0]["subseries"][0]["included"] is True
-    rates = _parse_agent_pick_rates(agents_html)
-    assert rates[0]["map"] == "all"
-    assert rates[1]["map"] == "Ascent"
-    assert rates[1]["agents"][0] == {"agent": "jett", "pick_rate": "100%"}
-    compositions = _parse_agent_compositions(agents_html)
-    assert compositions == [
-        {
-            "map": "Ascent",
-            "teams": [
-                {
-                    "team_id": "10",
-                    "team": "Winners",
-                    "team_url": "https://www.vlr.gg/team/10/winners",
-                    "logo": "https://cdn.test/team.png",
-                    "agents": ["jett"],
-                }
-            ],
-        }
+def test_event_match_utc_offset_skips_live_and_unparsed_rows():
+    now = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
+    rows = [
+        (datetime(2026, 9, 30, 14, 0), "LIVE", 0),
+        (None, "2h 0m", 1),
+        (datetime(2026, 9, 30, 14, 0), "3d 2h", 1),
     ]
-    assert _parse_event_news(HTMLParser(NEWS_HTML))[0]["article_id"] == "123"
-    pickem = _parse_pickem(HTMLParser(PICKEM_HTML))
-    assert pickem["sections"][0]["locked"] is True
-    assert pickem["sections"][0]["matches"][0]["team1"]["is_winner"] is True
-    assert pickem["sections"][0]["matches"][0]["team2"]["is_winner"] is False
-    assert pickem["leaderboard_distribution"] == [
-        {"points": "125", "distribution": "10% / 5 users"}
+    assert _event_match_utc_offset(rows, now) is None
+
+
+# --- /event/{id}: standings ---
+
+def _group_row(href, name, region, w, lo, t, maps, rounds, diff):
+    return f"""
+    <tr class=" mod-adv ">
+        <td style="border-right: 0; padding-right: 8px;">
+            <img src="/img/vlr/tmp/vlr.png" class="event-group-team-logo">
+        </td>
+        <td style="height: 53px;">
+            <a class="event-group-team" href="{href}">
+                <div class="event-group-team-name text-of">
+                    {name}
+                    <div class="ge-text-light event-group-team-region">
+                        {region}
+                    </div>
+                </div>
+            </a>
+            <div class="event-group-spoiler-placeholder"><div>Spoiler hidden</div><div>&nbsp;</div></div>
+        </td>
+        <td class="mod-center mod-record" style="font-weight: 700;">{w}</td>
+        <td class="mod-center mod-record" style="font-weight: 700;">{lo}</td>
+        <td class="mod-center mod-record">{t}</td>
+        <td class="mod-center mod-stat">{maps[0]}<span class="record-div">/</span>{maps[1]}</td>
+        <td class="mod-center mod-stat">{rounds[0]}<span class="record-div">/</span>{rounds[1]}</td>
+        <td class="mod-center mod-stat"><span class="diff mod-positive">{diff}</span></td>
+    </tr>"""
+
+
+def _group_table(title, rows):
+    return f"""
+    <div class="event-group-block wf-card mod-dark">
+        <table class="wf-table mod-simple mod-group">
+            <thead>
+                <tr>
+                    <th class="mod-title" colspan="2">{title}</th>
+                    <th class="mod-w mod-center" title="Wins">W</th>
+                    <th class="mod-l mod-center" title="Losses">L</th>
+                    <th class="mod-t mod-center" title="Ties">T</th>
+                    <th class="mod-center mod-maps mod-wide" title="Maps Won/Maps Lost">MAP</th>
+                    <th class="mod-center mod-rfra mod-wide" title="Rounds Won/Rounds Lost">RND</th>
+                    <th class="mod-center mod-dt mod-wide" title="Round Differential">&Delta;</th>
+                </tr>
+            </thead>
+            <tbody>{"".join(rows)}</tbody>
+        </table>
+    </div>"""
+
+
+# Trimmed from vlr.gg/event/3123 (Komplettligaen 2026: Autumn Division 1, group-stage view)
+ROUND_ROBIN_HTML = f"""
+<div class="event-content"><div style="display: flex; flex-direction: column;">
+<div style=" margin-bottom: 22px;">
+    <div class="wf-label mod-large">
+        Round Robin
+    </div>
+    <div class="event-group mod-fullwidth">
+        {_group_table("", [
+            _group_row("/team/23405/monark", "Monark", "Norway", 5, 0, 0, (6, 1), (87, 56), "+31"),
+            _group_row("/team/17599/uia-kraken", "UiA Kraken", "International", 4, 1, 0, (8, 3), (135, 102), "+33"),
+        ])}
+    </div>
+</div>
+</div></div>
+"""
+
+MULTI_GROUP_HTML = f"""
+<div class="wf-label mod-large">Group Stage</div>
+<div class="event-group">
+    {_group_table("Group A", [_group_row("/team/1/a", "Alpha", "Europe", 3, 0, 0, (6, 0), (78, 30), "+48")])}
+    {_group_table("Group B", [_group_row("/team/2/b", "Bravo", "Brazil", 2, 1, 0, (4, 3), (80, 70), "+10")])}
+</div>
+"""
+
+
+def test_parse_standings_reads_round_robin_group_tables():
+    standings = _parse_standings(parse_html(ROUND_ROBIN_HTML))
+
+    assert standings == [{
+        "stage": "Round Robin",
+        "group": "",
+        "columns": ["Team", "W", "L", "T", "MAP", "RND", "\u0394"],
+        "rows": [
+            {"Team": "Monark", "W": "5", "L": "0", "T": "0", "MAP": "6/1", "RND": "87/56", "\u0394": "+31"},
+            {"Team": "UiA Kraken", "W": "4", "L": "1", "T": "0", "MAP": "8/3", "RND": "135/102", "\u0394": "+33"},
+        ],
+    }]
+
+
+def test_parse_standings_names_each_group_of_a_multi_group_stage():
+    standings = _parse_standings(parse_html(MULTI_GROUP_HTML))
+
+    assert [(s["stage"], s["group"], s["rows"][0]["Team"]) for s in standings] == [
+        ("Group Stage", "Group A", "Alpha"),
+        ("Group Stage", "Group B", "Bravo"),
     ]
 
 
-def test_event_stats_filter_validation():
-    filters = normalize_event_stats_filters(
-        side="CT",
-        role="sentinel",
-        agent="Killjoy",
-        map_id="12",
-        min_rounds=100,
-        exclude="551.552",
-        sort="kmax",
-        direction="asc",
-    )
-    assert filters.side == "ct"
-    assert filters.agent == "killjoy"
-    assert filters.exclude == "551.552"
-
-    for kwargs in (
-        {"sort": "player"},
-        {"direction": "up"},
-        {"side": "attack"},
-        {"role": "flex"},
-        {"agent": "bad agent"},
-        {"map_id": "split"},
-        {"min_rounds": 1000},
-        {"exclude": "551,552"},
-    ):
-        with pytest.raises(HTTPException):
-            normalize_event_stats_filters(**kwargs)
-    with pytest.raises(HTTPException):
-        normalize_excluded_series("1..2")
+STANDINGS_PTABLE_HTML = """
+<div class="wf-card">
+    <div class="wf-label mod-large">Swiss Stage</div>
+    <div class="wf-ptable" role="table">
+        <div class="row" role="row">
+            <div class="cell" role="cell">Team</div>
+            <div class="cell" role="cell">W</div>
+            <div class="cell" role="cell">L</div>
+        </div>
+        <div class="row" role="row">
+            <div class="cell" role="cell"><a href="/team/1/alpha">Alpha</a></div>
+            <div class="cell" role="cell">2</div>
+            <div class="cell" role="cell">0</div>
+        </div>
+    </div>
+</div>
+"""
 
 
-def test_event_filter_mismatches_requires_every_control():
-    html = HTMLParser(
-        """
-        <select name="side"><option value="all" selected>All</option></select>
-        <input name="min_rounds" value="100">
-        """
-    )
-    assert _event_filter_mismatches(
-        html,
-        {"side": "ct", "min_rounds": 100, "agent": "killjoy"},
-    ) == {
-        "side": ("ct", "all"),
-        "agent": ("killjoy", "<missing>"),
-    }
+def test_parse_standings_ptable_entries_carry_an_empty_group():
+    """Both standings shapes expose `group` so consumers can index it safely."""
+    standings = _parse_standings(parse_html(STANDINGS_PTABLE_HTML))
+
+    assert standings == [{
+        "stage": "Swiss Stage",
+        "group": "",
+        "columns": ["Team", "W", "L"],
+        "rows": [{"Team": "Alpha", "W": "2", "L": "0"}],
+    }]
+
+
+# --- /event/{id}: prizes ---
+
+PRIZE_TABLE_HTML = """
+<div class="wf-label mod-large">Prize Distribution</div>
+<div class="wf-card mod-dark" style="margin-bottom: 30px; ">
+    <div class="wf-ptable wf-ptable--standings" role="table">
+        <div class="row" role="row">
+            <div class="cell" role="cell">Place</div>
+            <div class="cell" role="cell">Prize</div>
+            <div class="cell" role="cell">Team</div>
+        </div>
+        <div class="row " role="row">
+            <div class="cell" role="cell">1<sup>st</sup></div>
+            <div class="cell" role="cell">$1,000,000</div>
+            <div class="cell mod-team" role="cell">
+                <div class="ge-text-light">
+                    <img src="/img/vlr/tmp/vlr.png">
+                    TBD
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+"""
+
+
+def test_parse_prizes_finds_the_prize_table_after_group_cards():
+    # Group tables and group match cards are .wf-card.mod-dark as well and
+    # precede the prize table on a group-stage view
+    group_match_card = '<a class="wf-card event-group-series-match mod-dark" href="/755587/x">R1</a>'
+    html = parse_html(ROUND_ROBIN_HTML + group_match_card + PRIZE_TABLE_HTML)
+
+    prizes = _parse_prizes(html)
+
+    assert [(p["placement"], p["amount"], p["team"]["name"]) for p in prizes] == [("1st", "$1,000,000", "")]
+
+
+# --- /event/{id}: stages ---
+
+def _stage_subnav(active: str) -> str:
+    """Stage tabs of vlr.gg/event/2766 with ``active`` marked mod-active."""
+    def tab(slug, dates, name):
+        mod = " mod-active" if slug == active else " "
+        return f"""
+        <a href="/event/2766/valorant-champions-2026/{slug}" class="wf-subnav-item{mod}">
+            <div>
+                <div class="ge-text-light" style="font-size: 10px; text-transform: uppercase;">
+                    {dates}
+                </div>
+                <div class="wf-subnav-item-title">
+                    {name}
+                </div>
+            </div>
+        </a>"""
+
+    return f"""<div class="wf-subnav">
+        {tab("playoffs", "Oct 7&ndash;18", "Playoffs")}
+        {tab("group-stage", "Sep 24&ndash;Oct 4", "Group Stage")}
+    </div>"""
+
+
+def _stage_page(active: str) -> str:
+    return f"<html><body>{_stage_subnav(active)}{PRIZE_TABLE_HTML}</body></html>"
+
+
+def test_parse_event_stages_lists_every_stage_tab():
+    stages = _parse_event_stages(parse_html(_stage_subnav("group-stage")))
+
+    assert stages == [
+        {"name": "Playoffs", "slug": "playoffs", "dates": "Oct 7–18", "active": False},
+        {"name": "Group Stage", "slug": "group-stage", "dates": "Sep 24–Oct 4", "active": True},
+    ]
+
+
+def test_parse_event_stages_is_empty_for_single_stage_events():
+    assert _parse_event_stages(parse_html("<html><body><div class='event-content'></div></body></html>")) == []
 
 
 @pytest.mark.anyio
-async def test_event_detail_crawler_uses_stage_path_and_caches(monkeypatch):
-    calls = []
+async def test_vlr_event_detail_fetches_the_requested_stage_view(monkeypatch):
+    cache_manager.clear_all()
+    client = FakeAsyncClient({
+        "https://www.vlr.gg/event/2766": FakeResponse(200, _stage_page("group-stage")),
+        "https://www.vlr.gg/event/2766/-/playoffs": FakeResponse(200, _stage_page("playoffs")),
+    })
+    monkeypatch.setattr("api.scrapers.event_detail.get_http_client", lambda: client)
 
-    async def fake_fetch(url, *, client=None, **kwargs):
-        calls.append(url)
-        return FakeResponse(DETAIL_HTML)
+    default = await vlr_event_detail("2766")
+    playoffs = await vlr_event_detail("2766", "playoffs")
 
-    monkeypatch.setattr(detail_mod, "fetch_with_retries", fake_fetch)
-    monkeypatch.setattr(detail_mod, "get_http_client", lambda: object())
-
-    data = await vlr_event_detail("9", "group-stage")
-    assert calls == ["https://www.vlr.gg/event/9/-/group-stage"]
-    assert data["data"]["segments"]["event"]["event_id"] == "9"
-    assert data["data"]["segments"]["groups"][0]["name"] == "Group Alpha"
-    await vlr_event_detail("9", "group-stage")
-    assert len(calls) == 1
-
-
-@pytest.mark.anyio
-async def test_event_detail_rejects_upstream_stage_fallback(monkeypatch):
-    async def fake_fetch(url, *, client=None, **kwargs):
-        return FakeResponse(DETAIL_HTML)
-
-    monkeypatch.setattr(detail_mod, "fetch_with_retries", fake_fetch)
-    monkeypatch.setattr(detail_mod, "get_http_client", lambda: object())
-
-    with pytest.raises(HTTPException) as exc:
-        await vlr_event_detail("9", "not-a-real-stage")
-    assert exc.value.status_code == 400
-    assert "not-a-real-stage" in exc.value.detail
+    assert client.calls == ["https://www.vlr.gg/event/2766", "https://www.vlr.gg/event/2766/-/playoffs"]
+    assert [s["slug"] for s in default["data"]["segments"]["stages"] if s["active"]] == ["group-stage"]
+    assert [s["slug"] for s in playoffs["data"]["segments"]["stages"] if s["active"]] == ["playoffs"]
+    assert playoffs["data"]["segments"]["prizes"][0]["placement"] == "1st"
+    cache_manager.clear_all()
 
 
 @pytest.mark.anyio
-async def test_event_resource_crawlers(monkeypatch):
-    calls = []
+async def test_vlr_event_detail_rejects_an_unknown_stage(monkeypatch):
+    cache_manager.clear_all()
+    # vlr.gg answers an unknown stage slug with the default stage's page
+    client = FakeAsyncClient({
+        "https://www.vlr.gg/event/2766/-/finals": FakeResponse(200, _stage_page("group-stage")),
+    })
+    monkeypatch.setattr("api.scrapers.event_detail.get_http_client", lambda: client)
 
-    async def fake_fetch(url, *, client=None, **kwargs):
-        calls.append(url)
-        if "/stats/" in url:
-            return FakeResponse(STATS_HTML)
-        if "/agents/" in url:
-            return FakeResponse(AGENTS_HTML)
-        if "/news/" in url:
-            return FakeResponse(NEWS_HTML)
-        return FakeResponse(PICKEM_HTML)
+    with pytest.raises(HTTPException) as exc_info:
+        await vlr_event_detail("2766", "finals")
 
-    monkeypatch.setattr(resources_mod, "fetch_with_retries", fake_fetch)
-    monkeypatch.setattr(resources_mod, "get_http_client", lambda: object())
+    assert exc_info.value.status_code == 404
+    assert "playoffs, group-stage" in exc_info.value.detail
+    cache_manager.clear_all()
 
-    stats = await vlr_event_stats("9", side="ct", exclude="551")
-    agents = await vlr_event_agents("9", "552")
-    news = await vlr_event_news("9")
-    pickem = await vlr_event_pickem("9")
 
-    assert stats["data"]["segments"][0]["player_id"] == "100"
-    assert stats["data"]["segments"][0]["max_kills_game_id"] == "999"
-    assert stats["data"]["filters"]["side"] == "ct"
-    assert agents["data"]["pick_rates"][0]["map"] == "all"
-    assert news["data"]["segments"][0]["title"] == "Event story"
-    assert pickem["data"]["sections"][0]["matches"][0]["pick_id"] == "500"
-    assert any("side=ct" in call and "exclude=551" in call for call in calls)
+EVENT_TEAMS_HTML = """
+<div class="wf-card event-team">
+  <a class="event-team-name" href="/team/100/team-one">Team One</a>
+  <div class="event-team-note">via <a href="/event/900/qualifier-cup">Qualifier Cup</a></div>
+</div>
+<div class="wf-card event-team">
+  <a class="event-team-name" href="/team/200/team-two">Team Two</a>
+  <div class="event-team-note">via <a href="https://www.vlr.gg/event/901/other-cup">Other Cup</a></div>
+</div>
+<div class="wf-card event-team">
+  <a class="event-team-name" href="/team/300/team-three">Team Three</a>
+  <div class="event-team-note">via <a href="https://example.test/event/999/x">Elsewhere</a></div>
+</div>
+"""
+
+
+def test_parse_event_teams_exposes_the_qualifier_event_id():
+    teams = _parse_event_teams(parse_html(EVENT_TEAMS_HTML))
+
+    assert teams[0]["qualification"] == "Qualifier Cup"
+    assert teams[0]["qualification_event_id"] == "900"
+    # an absolute vlr.gg URL is accepted
+    assert teams[1]["qualification_event_id"] == "901"
+    # a foreign host is refused even when the path looks like an event
+    assert teams[2]["qualification_event_id"] == ""
+
+
+@pytest.mark.parametrize(
+    ("href", "expected"),
+    [
+        ("", ""),
+        ("/team/123/slug", ""),
+        ("/event/abc/slug", ""),
+        ("https://vlr.gg/event/77/slug", "77"),
+        ("not a url", ""),
+    ],
+)
+def test_qualifier_event_id_only_accepts_vlr_event_paths(href, expected):
+    assert _qualifier_event_id(href) == expected

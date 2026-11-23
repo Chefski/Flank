@@ -1,4 +1,5 @@
-import logging
+import re
+from datetime import UTC, datetime, timedelta
 
 from utils.cache_manager import cache_manager
 from utils.constants import CACHE_TTL_EVENT_MATCHES, CACHE_TTL_EVENTS, VLR_BASE_URL, VLR_EVENTS_URL
@@ -10,13 +11,19 @@ from utils.html_parsers import (
     extract_region_from_flag,
     extract_text_content,
     normalize_image_url,
+    pad_to_length,
+    parse_eta_to_timedelta,
     parse_href_id_slug,
     parse_html,
+    parse_local_datetime,
 )
 from utils.http_client import fetch_with_retries, get_http_client
-from utils.match_records import build_match_record, match_team, normalize_match_status
-
-logger = logging.getLogger(__name__)
+from utils.match_records import (
+    build_match_record,
+    match_team,
+    normalize_match_status,
+    rfc3339_utc,
+)
 
 
 def _parse_event_cards(container) -> list:
@@ -101,11 +108,7 @@ async def vlr_events(upcoming=True, completed=True, page=1, live=False):
     cache_key = ("events", upcoming, completed, page, live)
 
     async def build():
-        if not upcoming and not completed and not live:
-            show_upcoming = show_completed = True
-            show_live = False
-        else:
-            show_upcoming, show_completed, show_live = upcoming, completed, live
+        show_upcoming, show_completed, show_live = upcoming, completed, live
 
         events = []
         status = 200
@@ -147,6 +150,33 @@ async def vlr_events(upcoming=True, completed=True, page=1, live=False):
     return await cache_manager.get_or_create_async(CACHE_TTL_EVENTS, build, *cache_key)
 
 
+def _event_match_utc_offset(rows: list[tuple], now: datetime) -> timedelta | None:
+    """Infer the timezone VLR rendered an event matches page in.
+
+    VLR renders ``.match-item-time`` and the date headers in the viewer's
+    timezone (chosen server-side, with no marker in the HTML), so the wall
+    clock alone is not a reliable time. A countdown with minute precision
+    (``15h 15m`` until an upcoming match, ``8h 45m`` since a completed one;
+    no day part) pins that match's scheduled start to within a minute; the
+    page offset is its wall clock minus that UTC start, rounded to 15 minutes.
+    Returns None when no row qualifies.
+
+    ``rows`` holds ``(local_datetime, eta_text, direction)`` tuples, where
+    direction is 1 for upcoming, -1 for completed and 0 for anything else.
+    """
+    now_naive = now.astimezone(UTC).replace(tzinfo=None, second=0, microsecond=0)
+    for local_dt, eta_text, direction in rows:
+        if local_dt is None or direction == 0 or re.search(r"\d\s*[dw]", eta_text.lower()):
+            continue
+        delta = parse_eta_to_timedelta(eta_text)
+        if delta is None:
+            continue
+        start_utc = now_naive + direction * delta
+        offset_minutes = (local_dt - start_utc).total_seconds() / 60
+        return timedelta(minutes=round(offset_minutes / 15) * 15)
+    return None
+
+
 @handle_scraper_errors
 async def vlr_event_matches(event_id: str):
     """Get match list for a specific event from VLR.GG.
@@ -175,13 +205,15 @@ async def vlr_event_matches(event_id: str):
         )
 
         matches = []
+        timing_rows = []
         current_date = ""
 
         for elem in html.css(".wf-label.mod-large, a.wf-module-item.match-item"):
             classes = elem.attributes.get("class", "")
 
             if "wf-label" in classes:
-                current_date = elem.text(strip=True)
+                # Direct text only: VLR appends a "Today"/"Yesterday" wf-tag span
+                current_date = elem.text(deep=False, strip=True)
                 continue
 
             href = elem.attributes.get("href", "")
@@ -207,11 +239,17 @@ async def vlr_event_matches(event_id: str):
                     }
                 )
 
-            while len(teams) < 2:
-                teams.append({"name": "TBD", "score": "", "is_winner": False})
+            pad_to_length(teams, 2, lambda: {"name": "TBD", "score": "", "is_winner": False})
 
             series_el = elem.css_first(".match-item-event-series")
             event_series = series_el.text(strip=True) if series_el else ""
+            # The stage ("Group Stage", "Playoffs") is the event cell's own text,
+            # after the nested series div
+            event_el = elem.css_first(".match-item-event")
+            stage = event_el.text(deep=False, strip=True) if event_el else ""
+
+            time_el = elem.css_first(".match-item-time")
+            match_time = extract_text_content(time_el)
 
             status_el = elem.css_first(".ml-status")
             eta_el = elem.css_first(".ml-eta")
@@ -253,18 +291,41 @@ async def vlr_event_matches(event_id: str):
                 note=note,
             )
 
+            # Countdown direction: until an upcoming match, since a completed one
+            ml_el = elem.css_first(".ml")
+            ml_classes = ml_el.attributes.get("class", "") if ml_el else ""
+            direction = 0
+            if eta_el and "mod-completed" in ml_classes:
+                direction = -1
+            elif eta_el and "mod-live" not in ml_classes:
+                direction = 1
+            timing_rows.append(
+                (parse_local_datetime(current_date, match_time), extract_text_content(eta_el), direction)
+            )
+
             matches.append({
                 "match_id": match_id,
                 "url": match_url,
                 "date": current_date,
+                "time": match_time,
+                "unix_timestamp": "",
                 "status": match_status,
                 "note": note,
+                "stage": stage,
                 "event_series": event_series,
                 "team1": teams[0],
                 "team2": teams[1],
-                "time": time,
                 "match": canonical,
             })
+
+        offset = _event_match_utc_offset(timing_rows, datetime.now(UTC))
+        if offset is not None:
+            for match, (local_dt, _, _) in zip(matches, timing_rows, strict=True):
+                if local_dt is not None:
+                    unix_timestamp = (local_dt - offset).strftime("%Y-%m-%d %H:%M:%S")
+                    match["unix_timestamp"] = unix_timestamp
+                    if not match["match"].get("scheduled_at"):
+                        match["match"]["scheduled_at"] = rfc3339_utc(unix_timestamp)
 
         return {
             "data": {

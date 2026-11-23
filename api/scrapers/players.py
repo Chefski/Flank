@@ -5,7 +5,7 @@ import logging
 import re
 
 from utils.cache_manager import cache_manager
-from utils.constants import CACHE_TTL_PLAYER, CACHE_TTL_PLAYER_MATCHES, VLR_BASE_URL
+from utils.constants import CACHE_TTL_PLAYER, CACHE_TTL_PLAYER_MATCHES, VLR_PLAYER_URL
 from utils.error_handling import handle_scraper_errors, upstream_error_payload
 from utils.html_parsers import (
     HTMLParser,
@@ -13,6 +13,7 @@ from utils.html_parsers import (
     extract_region_from_flag,
     infer_platform,
     normalize_image_url,
+    pad_to_length,
     parse_href_id_slug,
     parse_html,
 )
@@ -157,39 +158,37 @@ def _parse_teams(html: HTMLParser) -> tuple[dict, list[dict]]:
 
 def _parse_agent_stats(html: HTMLParser) -> list[dict]:
     """
-    Extract per-agent statistics from the wf-table on the player page.
+    Extract per-agent statistics from the st-table on the player page.
 
-    Table columns (17 total):
+    Table columns (16 total):
       [0]  Agent (img alt/title)
       [1]  Use (count + %) — e.g. "(206) 46%"
       [2]  RND (rounds)
       [3]  Rating 2.0
       [4]  ACS
       [5]  K:D
-      [6]  ADR
-      [7]  KAST
+      [6]  KAST
+      [7]  ADR
       [8]  KPR
       [9]  APR
-      [10] FKPR
-      [11] FDPR
-      [12] K (kills)
-      [13] D (deaths)
-      [14] A (assists)
-      [15] FK
-      [16] FD
+      [10] FK:FD
+      [11] K (kills)
+      [12] D (deaths)
+      [13] A (assists)
+      [14] FK
+      [15] FD
     """
     agent_stats: list[dict] = []
 
-    table = html.css_first("table.wf-table")
+    table = html.css_first("table.st-table.mod-agent-rows")
     if not table:
         return agent_stats
 
     for row in table.css("tbody tr"):
         cells = row.css("td")
-        if len(cells) < 17:
+        if len(cells) < 16:
             continue
 
-        # Agent name
         agent = ""
         img = cells[0].css_first("img")
         if img:
@@ -199,7 +198,6 @@ def _parse_agent_stats(html: HTMLParser) -> list[dict]:
         if not agent:
             continue
 
-        # Use column — split count and percentage
         use_text = cells[1].text(strip=True)
         usage_count = ""
         usage_pct = ""
@@ -221,17 +219,16 @@ def _parse_agent_stats(html: HTMLParser) -> list[dict]:
             "rating": val(3),
             "acs": val(4),
             "kd": val(5),
-            "adr": val(6),
-            "kast": val(7),
+            "kast": val(6),
+            "adr": val(7),
             "kpr": val(8),
             "apr": val(9),
-            "fkpr": val(10),
-            "fdpr": val(11),
-            "kills": val(12),
-            "deaths": val(13),
-            "assists": val(14),
-            "fk": val(15),
-            "fd": val(16),
+            "fk_fd": val(10),
+            "kills": val(11),
+            "deaths": val(12),
+            "assists": val(13),
+            "fk": val(14),
+            "fd": val(15),
         })
 
     return agent_stats
@@ -285,15 +282,15 @@ def _parse_event_placements(html: HTMLParser) -> list[dict]:
         remaining = re.sub(r"[—\u2014\u2013$,\(\)]", " ", remaining)
         remaining = re.sub(r"\s+", " ", remaining).strip()
 
-        # Year is typically the last 4-digit number
-        year_match = re.search(r"(20\d{2})", remaining)
-        date = year_match.group(1) if year_match else ""
+        # The date column follows the team name, so the last 20xx is the year.
+        year_matches = list(re.finditer(r"20\d{2}", remaining))
+        date = year_matches[-1].group(0) if year_matches else ""
 
-        # Team name: what's left after removing the year
+        # Team name: what's left after removing that year (keep years inside the name).
         team = remaining
-        if date:
-            # Split on the year boundary to separate team from year
-            team = re.sub(r"20\d{2}", "", team).strip()
+        if year_matches:
+            last_year = year_matches[-1]
+            team = (remaining[: last_year.start()] + remaining[last_year.end():]).strip()
 
         href = item.attributes.get("href", "")
         url = build_full_url(href)
@@ -428,8 +425,7 @@ def _parse_player_match_item(item, *, page: int | None = None) -> dict | None:
             logo = normalize_image_url(logo_el.attributes.get("src", ""))
         teams.append({"name": name, "tag": tag, "logo": logo})
 
-    while len(teams) < 2:
-        teams.append({"name": "", "tag": "", "logo": ""})
+    pad_to_length(teams, 2, lambda: {"name": "", "tag": "", "logo": ""})
 
     # Event name
     event_elem = item.css_first(".m-item-event")
@@ -479,7 +475,7 @@ async def vlr_player(player_id: str, timespan: str = "90d") -> dict:
     cache_key = ("player", player_id, timespan)
 
     async def build():
-        url = f"{VLR_BASE_URL}/player/{player_id}/?timespan={timespan}"
+        url = f"{VLR_PLAYER_URL}/{player_id}/?timespan={timespan}"
         client = get_http_client()
         resp = await fetch_with_retries(url, client=client)
         status = resp.status_code
@@ -530,7 +526,7 @@ async def vlr_player_matches(player_id: str, page: int = 1) -> dict:
     cache_key = ("player_matches", player_id, page)
 
     async def build():
-        url = f"{VLR_BASE_URL}/player/matches/{player_id}/?page={page}"
+        url = f"{VLR_PLAYER_URL}/matches/{player_id}/?page={page}"
         client = get_http_client()
         resp = await fetch_with_retries(url, client=client)
         status = resp.status_code

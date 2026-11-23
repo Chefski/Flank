@@ -444,7 +444,7 @@ def adapt_stats(payload: dict) -> V3StatsData:
             map_id=map_id,
             minimum_rounds=optional_int(filters.get("min_rounds")) or 0,
             minimum_rating=optional_int(filters.get("min_rating")) or 0,
-            sort=nullable_text(filters.get("sort")) or "rating2",
+            sort=nullable_text(filters.get("sort")) or "rating",
             direction="asc" if filters.get("dir") == "asc" else "desc",
             from_date=optional_date(filters.get("from")),
             to_date=optional_date(filters.get("to")),
@@ -778,7 +778,59 @@ def _economy_bucket(value) -> V3EconomyBucket:
     return V3EconomyBucket(rounds=rounds, wins=wins)
 
 
+_ECM_GROUPS = {"eco": "on eco", "medium": "on half buy", "full": "on full buy"}
+
+
+def _ratio(value) -> tuple[int | None, int | None]:
+    """Parse vlr.gg's ``wins/attempts`` economy cell."""
+    text = nullable_text(value)
+    if text is None or "/" not in text:
+        return None, None
+    return _pair(text)
+
+
+def _ecm_bucket(source: dict, prefix: str) -> V3EconomyBucket:
+    """Sum the "vs. Eco/Half/Full" cells of one ``table.ecm`` buy-state group."""
+    rounds = wins = 0
+    seen = False
+    for key, value in source.items():
+        if not key.casefold().startswith(prefix):
+            continue
+        won, attempted = _ratio(value)
+        if won is None or attempted is None:
+            continue
+        seen = True
+        wins += won
+        rounds += attempted
+    return V3EconomyBucket(rounds=rounds, wins=wins) if seen else V3EconomyBucket()
+
+
+def _economy_ecm(source: dict) -> V3EconomyRow:
+    """Map the October 2026 ``table.ecm`` economy row onto the V3 buckets.
+
+    The redesigned widget reports three buy states (eco <10k, half 10-18k, full
+    18k+) as ``wins/attempts`` per opponent buy. They map onto eco, medium and
+    full; the retired 5-10k "$" bucket has no equivalent and stays null.
+    """
+    pistol_wins, pistol_attempts = _ratio(source.get("Pistol"))
+    pistol_percent = None
+    if pistol_wins is not None and pistol_attempts:
+        pistol_percent = round(100 * pistol_wins / pistol_attempts, 1)
+    return V3EconomyRow(
+        team_id=entity_id(source.get("team_id")),
+        team_tag=nullable_text(source.get("Team")),
+        pistol_wins=pistol_wins,
+        pistol_win_percent=pistol_percent,
+        eco=_ecm_bucket(source, _ECM_GROUPS["eco"]),
+        low=V3EconomyBucket(),
+        medium=_ecm_bucket(source, _ECM_GROUPS["medium"]),
+        full=_ecm_bucket(source, _ECM_GROUPS["full"]),
+    )
+
+
 def _economy(source: dict) -> V3EconomyRow:
+    if any(key.casefold().startswith(tuple(_ECM_GROUPS.values())) for key in source):
+        return _economy_ecm(source)
     pistol = nullable_text(source.get("Pistol"))
     pistol_wins = optional_int(source.get("Pistol Won"))
     if pistol_wins is None and pistol and "%" not in pistol:

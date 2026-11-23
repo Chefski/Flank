@@ -1047,35 +1047,19 @@ Original endpoints are not cached.
 
 ### Requirements
 
-- Python `3.11` (matches `.python-version`, CI, and the Docker image)
-- `pip`
+- Python `3.11`+ (`.python-version` pins `3.12`, which Vercel uses)
+- [uv](https://docs.astral.sh/uv/) — dependencies are declared in `pyproject.toml` and locked in `uv.lock`
 
 ```bash
-git clone https://github.com/axsddlr/vlrggapi/
+git clone https://github.com/Chefski/vlrggapi/
 cd vlrggapi
-python -m venv .venv
-```
-
-Activate the virtual environment:
-
-```bash
-# macOS / Linux
-source .venv/bin/activate
-
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
-```
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ### Run locally
 
 ```bash
-python main.py
+uv run python main.py            # listens on $PORT, default 3001
 ```
 
 The API will be available at `http://127.0.0.1:3001` and the interactive docs will be at `http://127.0.0.1:3001/`.
@@ -1096,8 +1080,11 @@ docker compose up --build
 ### Testing
 
 ```bash
-python -m pytest tests/ -v
+uv run pytest
+uv run ruff check .
 ```
+
+See [API.md](API.md) for upstream's full V2 reference and [WORKFLOW.md](WORKFLOW.md) for the selector-check workflow.
 
 ## Built With
 

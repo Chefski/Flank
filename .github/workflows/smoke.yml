@@ -11,7 +11,8 @@ permissions:
 jobs:
   upstream:
     name: Check upstream vlr.gg
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Check vlr.gg homepage
         run: |
@@ -33,50 +34,65 @@ jobs:
 
   api-smoke:
     name: API smoke test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # UV_PYTHON wins over .python-version (3.12, the Vercel runtime).
+    env:
+      UV_PYTHON: "3.13"
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: requirements.txt
-
-      - name: Set up Python
-        uses: actions/setup-python@v6.2.0
-        with:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: uv pip install --system -r requirements.txt
+        run: uv sync --locked
 
       - name: Start API server
         run: |
-          python main.py &
-          sleep 3
+          uv run python main.py > server.log 2>&1 &
           echo "Server PID: $!"
+          # Poll for readiness instead of sleeping a fixed 3s: a cold runner can
+          # take longer, and a fixed sleep either flakes or wastes time. The
+          # probe hits the local Swagger page, so it does not depend on vlr.gg.
+          for attempt in $(seq 1 60); do
+            if curl -fsS --max-time 2 "http://127.0.0.1:3001/" > /dev/null 2>&1; then
+              echo "API ready after ${attempt}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API did not become ready within 60s"
+          cat server.log
+          exit 1
+
+      - name: Show server log
+        if: failure()
+        run: cat server.log || true
 
       - name: Smoke test endpoints
         run: |
           set -e
-          curl -sSf --max-time 10 "http://127.0.0.1:3001/version" | python -c "import sys,json; d=json.load(sys.stdin); assert d['version'] == '3.0.0' and d['default_api'] == 'v3', f'bad version: {d}'"
+          curl -sSf --max-time 10 "http://127.0.0.1:3001/version" | uv run python -c "import sys,json; d=json.load(sys.stdin); assert d['version'] == '3.0.0' and d['default_api'] == 'v3', f'bad version: {d}'"
           echo "version OK"
 
-          curl -sSf --max-time 10 "http://127.0.0.1:3001/v2/health" | python -c "import sys,json; d=json.load(sys.stdin); assert d['status'] == 'success', f'bad health: {d}'"
+          curl -sSf --max-time 10 "http://127.0.0.1:3001/v2/health" | uv run python -c "import sys,json; d=json.load(sys.stdin); assert d['status'] == 'success', f'bad health: {d}'"
           echo "health OK"
 
-          curl -sSf --max-time 15 "http://127.0.0.1:3001/v2/news" | python -c "import sys,json; d=json.load(sys.stdin); assert len(d['data']['segments']) > 0, 'no news'"
+          curl -sSf --max-time 15 "http://127.0.0.1:3001/v2/news" | uv run python -c "import sys,json; d=json.load(sys.stdin); assert len(d['data']['segments']) > 0, 'no news'"
           echo "news OK"
 
-          curl -sSf --max-time 15 "http://127.0.0.1:3001/v3/news" | python -c "import sys,json; d=json.load(sys.stdin); assert d['api_version'] == '3' and len(d['data']) > 0, 'no typed news'"
+          curl -sSf --max-time 15 "http://127.0.0.1:3001/v3/news" | uv run python -c "import sys,json; d=json.load(sys.stdin); assert d['api_version'] == '3' and len(d['data']) > 0, 'no typed news'"
           echo "typed news OK"
 
-          curl -sSf --max-time 15 "http://127.0.0.1:3001/v2/rankings?region=na" | python -c "import sys,json; d=json.load(sys.stdin); assert len(d['data']['segments']) > 0, 'no rankings'"
+          curl -sSf --max-time 15 "http://127.0.0.1:3001/v2/rankings?region=na" | uv run python -c "import sys,json; d=json.load(sys.stdin); assert len(d['data']['segments']) > 0, 'no rankings'"
           echo "rankings OK"
 
-          curl -sSf --max-time 15 "http://127.0.0.1:3001/v2/events" | python -c "import sys,json; d=json.load(sys.stdin); assert len(d['data']['segments']) > 0, 'no events'"
+          curl -sSf --max-time 15 "http://127.0.0.1:3001/v2/events" | uv run python -c "import sys,json; d=json.load(sys.stdin); assert len(d['data']['segments']) > 0, 'no events'"
           echo "events OK"
 
           echo "All smoke tests passed"

@@ -7,7 +7,7 @@ from urllib.parse import urljoin, urlparse
 from zoneinfo import ZoneInfo
 
 from selectolax.lexbor import LexborHTMLParser
-from selectolax.parser import HTMLParser  # noqa: F401  re-exported for type hints
+from selectolax.lexbor import LexborHTMLParser as HTMLParser  # noqa: F401  re-exported for type hints
 
 
 def extract_text_content(element, strip: bool = True) -> str:
@@ -130,15 +130,6 @@ def build_full_url(href: str, base_url: str = "https://www.vlr.gg") -> str:
     return urljoin(f"{base_url.rstrip('/')}/", href)
 
 
-def extract_tournament_icon(item) -> str:
-    """Normalize icon URL extraction from a match/event item."""
-    icon_elem = item.css_first(".match-item-icon img") or item.css_first("img")
-    if not icon_elem:
-        return ""
-    src = icon_elem.attributes.get("src", "")
-    return normalize_image_url(src)
-
-
 def extract_match_teams(item, selector: str = ".h-match-team") -> tuple[dict, dict]:
     """
     Extract team info from a match item.
@@ -169,13 +160,12 @@ def extract_match_teams(item, selector: str = ".h-match-team") -> tuple[dict, di
 
         teams.append({"name": name, "flag": flag, "score": score})
 
-    while len(teams) < 2:
-        teams.append({"name": "TBD", "flag": "", "score": ""})
+    pad_to_length(teams, 2, lambda: {"name": "TBD", "flag": "", "score": ""})
 
     return teams[0], teams[1]
 
 
-# --- Timestamp parsing helpers (moved from matches.py) ---
+# --- Timestamp parsing helpers ---
 
 def parse_eta_to_timedelta(eta_text: str) -> timedelta | None:
     """Parse '4h 1m' / '1d 2h' / '30m' into timedelta. Returns None for LIVE/ago/unparseable."""
@@ -199,27 +189,27 @@ def parse_eta_to_timedelta(eta_text: str) -> timedelta | None:
     return total if total > timedelta() else None
 
 
-def combine_date_and_time(date_str: str, time_text: str) -> str:
-    """Parse 'Mon, February 9, 2026' + '4:00 AM' -> UTC timestamp string.
+def parse_local_datetime(date_str: str, time_text: str, today=None) -> datetime | None:
+    """Parse 'Mon, February 9, 2026' + '4:00 AM' into a naive datetime.
 
-    Interprets times as US Eastern. Returns '' on failure.
+    The result carries no timezone: VLR renders these in the viewer's zone.
+    'Today' / 'Tomorrow' resolve against ``today`` (a date) when given.
+    Returns None on failure.
     """
     if not date_str or not time_text:
-        return ""
+        return None
     time_text = time_text.strip()
     if not time_text or time_text.upper() in ("TBD", "LIVE", "-"):
-        return ""
-
-    eastern = ZoneInfo("America/New_York")
+        return None
 
     # Clean up date_str: remove day-of-week prefix like "Mon, "
     cleaned_date = re.sub(r"^[A-Za-z]+,\s*", "", date_str.strip())
     # Handle "Today" / "Tomorrow" by skipping date parse
     if cleaned_date.lower() in ("today", "tomorrow"):
-        now_eastern = datetime.now(eastern)
-        if cleaned_date.lower() == "tomorrow":
-            now_eastern += timedelta(days=1)
-        cleaned_date = now_eastern.strftime("%B %d, %Y")
+        if today is None:
+            return None
+        day = today + timedelta(days=1) if cleaned_date.lower() == "tomorrow" else today
+        cleaned_date = day.strftime("%B %d, %Y")
 
     # Parse time: "4:00 AM" or "16:00"
     parsed_time = None
@@ -230,7 +220,7 @@ def combine_date_and_time(date_str: str, time_text: str) -> str:
         except ValueError:
             continue
     if parsed_time is None:
-        return ""
+        return None
 
     # Parse date: "February 9, 2026"
     parsed_date = None
@@ -241,32 +231,48 @@ def combine_date_and_time(date_str: str, time_text: str) -> str:
         except ValueError:
             continue
     if parsed_date is None:
-        return ""
+        return None
 
-    local_dt = datetime.combine(parsed_date, parsed_time, tzinfo=eastern)
-    utc_dt = local_dt.astimezone(UTC)
+    return datetime.combine(parsed_date, parsed_time)
+
+
+def combine_date_and_time(date_str: str, time_text: str) -> str:
+    """Parse 'Mon, February 9, 2026' + '4:00 AM' -> UTC timestamp string.
+
+    Interprets times as US Eastern. Returns '' on failure.
+    """
+    eastern = ZoneInfo("America/New_York")
+    local_dt = parse_local_datetime(date_str, time_text, today=datetime.now(eastern).date())
+    if local_dt is None:
+        return ""
+    utc_dt = local_dt.replace(tzinfo=eastern).astimezone(UTC)
     return utc_dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def parse_match_timestamp(item, date_str: str) -> str:
     """Multi-strategy timestamp extraction for a match item.
 
-    1. .moment-tz-convert[data-utc-ts]
+    1. .moment-tz-convert[data-utc-ts]: unix, or Eastern string -> UTC
     2. .ml-eta countdown -> utcnow() + delta
     3. date header + .match-item-time -> Eastern -> UTC
     4. '' if all fail
     """
-    # Strategy 1: direct UTC timestamp element
+    # Strategy 1: timestamp attribute. vlr.gg renders data-utc-ts in two
+    # forms: a unix number (homepage, e.g. "1790845200") and, on match pages,
+    # a US Eastern "YYYY-MM-DD HH:MM:SS" string despite the attribute's name
+    # ("2026-07-16 20:20:00" is shown as "2:20 AM CEST").
     ts_elem = item.css_first(".moment-tz-convert")
     if ts_elem:
-        unix_ts = ts_elem.attributes.get("data-utc-ts")
-        if unix_ts:
-            try:
-                return datetime.fromtimestamp(
-                    int(unix_ts), tz=UTC
-                ).strftime("%Y-%m-%d %H:%M:%S")
-            except (ValueError, OSError):
-                pass
+        raw_ts = (ts_elem.attributes.get("data-utc-ts") or "").strip()
+        try:
+            if raw_ts.isdigit():
+                utc_dt = datetime.fromtimestamp(int(raw_ts), tz=UTC)
+            else:
+                local_dt = datetime.strptime(raw_ts, "%Y-%m-%d %H:%M:%S")
+                utc_dt = local_dt.replace(tzinfo=ZoneInfo("America/New_York")).astimezone(UTC)
+            return utc_dt.strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, OSError):
+            pass
 
     # Strategy 2: ETA countdown
     eta_elem = item.css_first(".ml-eta")
@@ -342,54 +348,25 @@ def parse_html(html: str):
     return LexborHTMLParser(strip_html(html))
 
 
-def parse_match_items(html, container_selector: str = "a.wf-module-item.match-item") -> list[dict]:
-    """Parse match list items shared by player/team match history pages.
+def find_elements_by_selectors(html, selectors) -> list:
+    """Return the first non-empty ``html.css(selector)`` result from *selectors*.
 
-    Returns list of dicts with: url, teams, scores, event, date, status.
+    vlr.gg ships markup changes unevenly, so several scrapers try selectors in
+    order and use whichever still matches. Returns ``[]`` when none match.
     """
-    items = html.css(container_selector)
-    results = []
-    for item in items:
-        href = item.attributes.get("href", "")
-        match_id, _ = parse_href_id_slug(href)
-        url = build_full_url(href)
+    for selector in selectors:
+        elements = html.css(selector)
+        if elements:
+            return elements
+    return []
 
-        # Teams
-        team_elems = item.css(".match-item-vs-team")
-        teams = []
-        for te in team_elems:
-            name_el = te.css_first(".match-item-vs-team-name")
-            score_el = te.css_first(".match-item-vs-team-score")
-            name = name_el.text(strip=True) if name_el else "TBD"
-            score = score_el.text(strip=True) if score_el else ""
-            teams.append({"name": name, "score": score})
-        while len(teams) < 2:
-            teams.append({"name": "TBD", "score": ""})
 
-        # Event
-        event_el = item.css_first(".match-item-event")
-        event_text = ""
-        if event_el:
-            lines = [line.strip() for line in event_el.text().split("\n") if line.strip()]
-            event_text = lines[-1] if lines else ""
-        series_el = item.css_first(".match-item-event-series")
-        event_series = " ".join(series_el.text().split()) if series_el else ""
+def pad_to_length(items: list, length: int, factory) -> list:
+    """Grow *items* in place to *length*, building each filler via *factory*.
 
-        # ETA / status
-        eta_el = item.css_first(".ml-status") or item.css_first(".ml-eta")
-        status = eta_el.text(strip=True) if eta_el else ""
-
-        timestamp = parse_match_timestamp(item, "")
-
-        results.append({
-            "match_id": match_id,
-            "url": url,
-            "team1": teams[0],
-            "team2": teams[1],
-            "event": event_text,
-            "event_series": event_series,
-            "status": status,
-            "timestamp": timestamp,
-        })
-
-    return results
+    ``factory`` is called per filler so padded entries never alias each other.
+    Lists already at or beyond *length* are left untouched. Returns *items*.
+    """
+    while len(items) < length:
+        items.append(factory())
+    return items

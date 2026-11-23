@@ -3,6 +3,8 @@ Error handling utilities for VLR.GG API
 """
 import asyncio
 import logging
+import re
+from datetime import datetime
 from functools import wraps
 
 import httpx
@@ -12,6 +14,7 @@ from utils.constants import (
     MAX_MATCH_PAGE_WINDOW,
     MAX_MATCH_RETRIES,
     MAX_MATCH_TIMEOUT,
+    STATS_MAP_IDS,
     STATS_REGIONS,
 )
 from utils.http_client import CircuitOpenError
@@ -23,7 +26,7 @@ VALID_TIMESPANS = {"30", "60", "90", "all"}
 VALID_PLAYER_TIMESPANS = {"30d", "60d", "90d", "all"}
 VALID_MATCH_QUERIES = {"upcoming", "upcoming_extended", "live_score", "results"}
 VALID_EVENT_QUERIES = {"upcoming", "completed", "live", None}
-VALID_TEAM_QUERIES = {"profile", "matches", "transactions", "stats"}
+VALID_TEAM_QUERIES = {"profile", "matches", "transactions", "stats", "roster", "schedule"}
 VALID_PLAYER_QUERIES = {"profile", "matches"}
 
 
@@ -132,6 +135,26 @@ def validate_stats_region(key: str) -> str:
     return normalized
 
 
+def validate_stats_map(key: str) -> str:
+    """Resolve a /stats map name to vlr.gg's numeric map_id ("all" passes through).
+
+    Raises 400 for anything unknown rather than silently widening the query to
+    all maps, which is what vlr.gg itself does with an unrecognized map_id.
+    """
+    normalized = (key or "all").strip().lower()
+    if normalized == "all":
+        return "all"
+    if normalized not in STATS_MAP_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid map '{key}'. Valid values: all, "
+                f"{', '.join(sorted(STATS_MAP_IDS))}"
+            ),
+        )
+    return STATS_MAP_IDS[normalized]
+
+
 def validate_timespan(ts: str):
     """Validate timespan value. Raises 400 on invalid."""
     if ts not in VALID_TIMESPANS:
@@ -139,6 +162,20 @@ def validate_timespan(ts: str):
             status_code=400,
             detail=f"Invalid timespan '{ts}'. Valid values: {', '.join(sorted(VALID_TIMESPANS))}",
         )
+
+
+def validate_date_param(value: str) -> None:
+    """Validate a YYYY-MM-DD date parameter. Raises 400 on invalid."""
+    invalid = HTTPException(
+        status_code=400,
+        detail=f"Invalid date '{value}'. Must be YYYY-MM-DD.",
+    )
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise invalid
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise invalid from None
 
 
 def validate_match_query(q: str):
@@ -192,6 +229,15 @@ def validate_id_param(value: str, name: str = "id"):
         raise HTTPException(
             status_code=400,
             detail=f"Invalid {name} '{value}'. Must be a numeric ID.",
+        )
+
+
+def validate_slug_param(value: str, name: str = "slug"):
+    """Validate that a parameter is a vlr.gg URL slug (lowercase letters, digits, hyphens). Raises 400 on invalid."""
+    if not value or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {name} '{value}'. Must be a vlr.gg slug such as 'group-stage'.",
         )
 
 
