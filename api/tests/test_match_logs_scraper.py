@@ -449,3 +449,12 @@ def test_map_is_over_once_the_last_round_score_is_decisive(last_score, may_grow)
 
     rounds = [{"score": {"team1": 0, "team2": 1}}, {"score": last_score}]
     assert _replay_may_grow(parse_html("<html></html>"), rounds) is may_grow
+
+
+@pytest.mark.parametrize("note", ["final", "Completed", "FINAL"])
+def test_replay_is_settled_when_the_header_says_the_match_is_over(note):
+    from api.scrapers.match_logs import _replay_may_grow
+
+    html = parse_html(f'<div class="match-header-vs-note">{note}</div>')
+    rounds = [{"score": {"team1": 12, "team2": 11}}]
+    assert _replay_may_grow(html, rounds) is False

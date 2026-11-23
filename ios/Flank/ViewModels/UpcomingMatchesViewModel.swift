@@ -84,9 +84,13 @@ class V3MatchListStore: ObservableObject {
     /// interval from here, so a slow or timed-out request doesn't shorten the gap.
     private(set) var lastFetchFinishedAt: Date?
 
-    func fetch() async {
-        let previous = state
-        defer { lastFetchFinishedAt = Date() }
+    /// - Parameter isPeriodic: True for a background poll. Only then is a repeat of
+    ///   the same failure kept out of analytics; a user's retry always reports it.
+    func fetch(isPeriodic: Bool = false) async {
+        let previous: ListLoadState? = isPeriodic ? state : nil
+        // A fetch cancelled mid-flight (e.g. by a scene-phase change) brought no new
+        // data, so it must not push the next poll a full interval away.
+        defer { if !Task.isCancelled { lastFetchFinishedAt = Date() } }
         if matches.isEmpty {
             state = .loading
         }

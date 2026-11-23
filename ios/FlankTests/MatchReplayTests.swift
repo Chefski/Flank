@@ -94,8 +94,12 @@ final class MatchReplayTests: XCTestCase {
 
         let normalised = try decodeReplay(replayJSON(x: 0.4, y: 0.9))
         XCTAssertEqual(normalised.canvasSize, 1)
-        let outOfRange = try decodeReplay(replayJSON(x: 2048, y: 10))
-        XCTAssertNil(outOfRange.canvasSize)
+        // Some maps (Abyss) run past vlr.gg's nominal 1024 canvas; the canvas grows
+        // to fit instead of dropping the whole plot.
+        let abyss = try decodeReplay(replayJSON(x: 1149.6, y: 749.2))
+        XCTAssertEqual(abyss.canvasSize, 1150)
+        let negative = try decodeReplay(replayJSON(x: -5, y: 10))
+        XCTAssertNil(negative.canvasSize)
     }
 
     func testReplaySurvivesCacheRoundTrip() throws {

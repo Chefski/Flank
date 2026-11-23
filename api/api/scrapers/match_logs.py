@@ -275,7 +275,10 @@ def _replay_may_grow(html: HTMLParser, rounds: list[dict]) -> bool:
         if high >= 13 and high - low >= 2:
             return False
     note = html.css_first(".match-header-vs-note")
-    return not (note is not None and "final" in extract_text_content(note).lower())
+    if note is None:
+        return True
+    status = extract_text_content(note).strip().lower()
+    return not any(word in status for word in ("final", "completed"))
 
 
 def parse_logs(html: HTMLParser) -> dict:

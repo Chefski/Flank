@@ -27,6 +27,9 @@ final class EventListStore: ObservableObject {
     /// Bumped by each first-page fetch so an older "load more" can't append to a list
     /// that was refreshed underneath it.
     private var generation = 0
+    /// True while a first-page fetch is in flight. "Load more" waits for it: until it
+    /// lands, `nextPage` still points into the old list.
+    private var isRefreshing = false
 
     private var cacheKey: String { "v3.events.\(query.rawValue)" }
 
@@ -40,13 +43,15 @@ final class EventListStore: ObservableObject {
     /// Fetches unless this segment already loaded this session, so switching segments
     /// keeps the pages already shown. Pull-to-refresh and retry call `fetch()` instead.
     func fetchIfNeeded() async {
-        guard !hasLoaded || events.isEmpty else { return }
+        guard !hasLoaded else { return }
         await fetch()
     }
 
     func fetch() async {
         generation += 1
         let request = generation
+        isRefreshing = true
+        defer { if request == generation { isRefreshing = false } }
         // A "load more" still in flight belongs to the old list and will be dropped.
         isLoadingMore = false
         if events.isEmpty {
@@ -73,7 +78,7 @@ final class EventListStore: ObservableObject {
     }
 
     func loadMore() async {
-        guard canLoadMore, !isLoadingMore, nextPage <= Self.maximumPage else { return }
+        guard canLoadMore, !isLoadingMore, !isRefreshing, nextPage <= Self.maximumPage else { return }
         let request = generation
         let page = nextPage
         isLoadingMore = true

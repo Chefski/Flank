@@ -9,4 +9,4 @@ xcuserdata/
 .env
 
 # Claude Code agent worktrees
-.claude/
+.claude/worktrees/

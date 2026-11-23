@@ -164,7 +164,8 @@ class UpstreamGuard:
         self.cooldown_base = cooldown_base
         self.cooldown_max = cooldown_max
         self._semaphore: asyncio.Semaphore | None = None
-        self._next_start = 0.0
+        self._pace_lock: asyncio.Lock | None = None
+        self._last_start = float("-inf")
         self._cooldown_until: dict[str, float] = {}
         self._strikes: dict[str, int] = {}
 
@@ -195,14 +196,17 @@ class UpstreamGuard:
             ) from None
         try:
             if self.min_interval > 0:
-                now = time.monotonic()
-                start = max(now, self._next_start)
-                # Reserve the start now so queued requests space themselves out,
-                # then move it to the real dispatch time below.
-                self._next_start = start + self.min_interval
-                if start > now:
-                    await _pace_sleep(start - now)
-                self._next_start = max(self._next_start, time.monotonic() + self.min_interval)
+                # One caller at a time measures the gap from the previous actual
+                # start, sleeps out the rest of it and records its own start. The
+                # lock is held across the sleep, so callers that wake late can
+                # never dispatch together.
+                if self._pace_lock is None:
+                    self._pace_lock = asyncio.Lock()
+                async with self._pace_lock:
+                    wait = self._last_start + self.min_interval - time.monotonic()
+                    if wait > 0:
+                        await _pace_sleep(wait)
+                    self._last_start = time.monotonic()
             yield
         finally:
             semaphore.release()
@@ -242,7 +246,8 @@ class UpstreamGuard:
     def reset(self) -> None:
         """Clear all state. Intended for use in tests."""
         self._semaphore = None
-        self._next_start = 0.0
+        self._pace_lock = None
+        self._last_start = float("-inf")
         self._cooldown_until.clear()
         self._strikes.clear()
 

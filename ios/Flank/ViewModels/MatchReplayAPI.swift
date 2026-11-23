@@ -195,10 +195,12 @@ struct ReplayEvent: Codable, Hashable, Sendable {
     var slot: ReplayTeamSlot { ReplayTeamSlot(number: team) }
     var victimSlot: ReplayTeamSlot { ReplayTeamSlot(number: victimTeam) }
 
-    /// vlr.gg records a spike detonation death with the victim as its own killer.
+    /// vlr.gg records environment deaths with the victim as its own killer and names
+    /// the cause in `source` ("Spike", "Fall"). Only fall back to the self-kill rule
+    /// when `source` is missing.
     var isSpikeKill: Bool {
         kind == .kill && (source?.caseInsensitiveCompare("Spike") == .orderedSame
-            || (player != nil && player == victim))
+            || (source?.nilIfBlank == nil && player != nil && player == victim))
     }
 }
 
@@ -319,10 +321,11 @@ struct MatchReplay: Codable, Hashable, Sendable {
     }
 
     /// The side length of the square the positions are drawn in, or `nil` when the
-    /// payload has no positions or they fall outside every canvas the app knows.
+    /// payload has no usable positions.
     ///
-    /// vlr.gg draws its replay on a 1024 × 1024 SVG; already-normalised (0...1)
-    /// coordinates are accepted too.
+    /// vlr.gg's replay coordinates are per-map pixels on a nominally 1024-unit canvas,
+    /// but some maps run past it (Abyss reaches x ≈ 1157), so the canvas grows to the
+    /// largest coordinate seen. Already-normalised (0...1) coordinates are accepted too.
     var canvasSize: Double? {
         var maxValue = 0.0
         var hasPoint = false
@@ -337,8 +340,7 @@ struct MatchReplay: Codable, Hashable, Sendable {
         }
         guard hasPoint else { return nil }
         if maxValue <= 1 { return 1 }
-        if maxValue <= 1024 { return 1024 }
-        return nil
+        return max(1024, maxValue.rounded(.up))
     }
 }
 
@@ -407,7 +409,8 @@ private extension KeyedDecodingContainer {
             return value
         }
         if let value = try? decodeIfPresent(Double.self, forKey: key), value.isFinite {
-            return Int(value.rounded())
+            // Int(_:) traps outside Int's range; drop such a value instead.
+            return Int(exactly: value.rounded())
         }
         if let value = try? decodeIfPresent(String.self, forKey: key) {
             return Int(value)

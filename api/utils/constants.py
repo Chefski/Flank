@@ -1,6 +1,7 @@
 """
 Configuration constants for VLR.GG API
 """
+import math
 import os
 
 # Base URLs
@@ -44,10 +45,12 @@ CIRCUIT_RESET_TIMEOUT = 30.0
 
 
 def _env_float(name: str, default: float) -> float:
+    """A finite float from the environment, or ``default`` if unset or invalid."""
     try:
-        return float(os.environ.get(name, default))
+        value = float(os.environ.get(name, default))
     except ValueError:
         return default
+    return value if math.isfinite(value) else default
 
 
 # Upstream politeness (utils.http_client.UpstreamGuard). Every request to

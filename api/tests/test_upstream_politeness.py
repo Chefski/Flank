@@ -340,6 +340,33 @@ async def test_pacing_counts_from_the_actual_dispatch_time(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_concurrent_callers_that_wake_late_still_start_apart(monkeypatch):
+    """A busy event loop must not let several paced callers dispatch together."""
+    import asyncio
+
+    guard = UpstreamGuard(max_concurrency=6, min_interval=0.5)
+    clock = [1000.0]
+    starts: list[float] = []
+
+    async def late_pace(delay):
+        await asyncio.sleep(0)
+        clock[0] += delay + 0.3  # every wake-up is late
+
+    monkeypatch.setattr(http_client, "_pace_sleep", late_pace)
+    monkeypatch.setattr(http_client.time, "monotonic", lambda: clock[0])
+
+    async def request():
+        async with guard.slot():
+            starts.append(clock[0])
+
+    await asyncio.gather(*(request() for _ in range(5)))
+
+    gaps = [later - earlier for earlier, later in zip(starts, starts[1:])]
+    assert len(starts) == 5
+    assert all(gap >= 0.5 for gap in gaps)
+
+
+@pytest.mark.anyio
 async def test_waiting_for_a_slot_is_bounded():
     guard = UpstreamGuard(max_concurrency=1, min_interval=0.0)
     holding = asyncio.Event()
@@ -425,3 +452,11 @@ def test_partial_payload_never_replaces_a_complete_last_good():
     assert cache.get(30, "k") is partial
     assert cache.cached_ttl(partial, (30, 3600), "k") == 30
     assert cache.cached_ttl(complete, (30, 3600), "k") == 3600
+
+
+@pytest.mark.parametrize("raw", ["nan", "inf", "-inf", "not-a-number"])
+def test_env_float_falls_back_on_non_finite_or_invalid_values(monkeypatch, raw):
+    from utils.constants import _env_float
+
+    monkeypatch.setenv("VLR_TEST_FLOAT", raw)
+    assert _env_float("VLR_TEST_FLOAT", 6) == 6

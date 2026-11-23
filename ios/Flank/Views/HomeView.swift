@@ -117,7 +117,7 @@ struct HomeView: View {
                             }
                             continue
                         }
-                        await liveMatches.fetch()
+                        await liveMatches.fetch(isPeriodic: true)
                     }
                 }
                 .sheet(isPresented: $showingSettings) {

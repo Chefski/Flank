@@ -757,19 +757,21 @@ async def test_upstream_guard_spaces_request_starts(monkeypatch):
     from utils.http_client import UpstreamGuard
 
     guard = UpstreamGuard(max_concurrency=4, min_interval=0.5)
+    clock = [1000.0]
     paced: list[float] = []
 
     async def fake_pace(delay):
         paced.append(round(delay, 1))
+        clock[0] += delay
 
     monkeypatch.setattr(http_client, "_pace_sleep", fake_pace)
-    monkeypatch.setattr(http_client.time, "monotonic", lambda: 1000.0)
+    monkeypatch.setattr(http_client.time, "monotonic", lambda: clock[0])
 
     for _ in range(3):
         async with guard.slot():
             pass
 
-    assert paced == [0.5, 1.0]
+    assert paced == [0.5, 0.5]
 
 
 @pytest.mark.anyio

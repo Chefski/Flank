@@ -573,27 +573,31 @@ private struct TeamFixtureRow: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        HStack(spacing: 12) {
-            opponentLogo
-            VStack(alignment: .leading, spacing: 3) {
-                Text("vs \(opponentName)")
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                if !eventLine.isEmpty {
-                    Text(eventLine)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+        // The VoiceOver label carries the countdown, so it is rebuilt every minute
+        // alongside the visible one instead of freezing at first render.
+        TimelineView(.everyMinute) { context in
+            HStack(spacing: 12) {
+                opponentLogo
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("vs \(opponentName)")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    if !eventLine.isEmpty {
+                        Text(eventLine)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
                 }
+                Spacer(minLength: 8)
+                timing
+                Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
             }
-            Spacer(minLength: 8)
-            timing
-            Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
+            .frame(minHeight: 56)
+            .contentShape(.rect)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityText(now: context.date))
         }
-        .frame(minHeight: 56)
-        .contentShape(.rect)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityText(now: .now))
         .task(id: fixture.matchID) { await hydrate() }
     }
 
