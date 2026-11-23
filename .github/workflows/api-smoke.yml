@@ -1,4 +1,4 @@
-name: Smoke
+name: API Smoke
 
 on:
   schedule:
@@ -36,6 +36,9 @@ jobs:
     name: API smoke test
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: api
     # UV_PYTHON wins over .python-version (3.12, the Vercel runtime).
     env:
       UV_PYTHON: "3.13"
@@ -47,7 +50,9 @@ jobs:
         uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
+          cache-dependency-glob: api/uv.lock
           python-version: "3.13"
+          working-directory: api
 
       - name: Install dependencies
         run: uv sync --locked

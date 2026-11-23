@@ -22,10 +22,41 @@
 - 🌙 **Dark Mode Support**: Comfortable viewing experience day and night
 - 📱 **Native iOS Experience**: Built with SwiftUI for smooth performance
 
+## Repository layout
+
+| Path | What it is |
+|------|------------|
+| `ios/` | The SwiftUI app. Open `ios/Flank.xcodeproj`. |
+| `api/` | The VLR.gg data service the app talks to (a fork of [axsddlr/vlrggapi](https://github.com/axsddlr/vlrggapi), MIT). FastAPI, managed with `uv`, deployed to Vercel with `api` as the project root. |
+| `.github/workflows/api-*.yml` | CI for the API. These run only when `api/**` (or the workflow itself) changes. |
+
+Working on the API:
+
+```sh
+cd api
+uv sync
+uv run pytest -q
+uv run python main.py   # serves on http://127.0.0.1:3001
+```
+
+Point a Debug build of the app at the local server with the launch argument
+`-FLANKAPIHost http://127.0.0.1:3001`.
+
+`api/` was imported with `git subtree`, keeping its history. To pull fixes from
+the original upstream project:
+
+```sh
+git remote add vlrggapi-upstream https://github.com/axsddlr/vlrggapi.git   # once
+git subtree pull --prefix=api vlrggapi-upstream master
+```
+
+`api/WORKFLOW.md` and the API README describe the API's earlier single-branch
+(`master`) setup; in this repo the API follows the same `dev`/`main` flow as the app.
+
 ## Development and releases
 
 - `dev` is the default branch and the integration point for ongoing work.
-- `main` is the release branch watched by Xcode Cloud.
+- `main` is the release branch: Xcode Cloud builds the app from it, and the API's production deploy and Docker image come from it.
 - To create a new build, update `dev`, then fast-forward `main` to `origin/dev` and push `main`:
 
   ```sh
@@ -53,4 +84,4 @@ Keeping release-only changes out of `main` ensures every Xcode Cloud build corre
 Flank relies on the following amazing resources:
 
 - [VLR.gg](https://vlr.gg) - The premier source for Valorant esports coverage, news, and match data
-- [Flank VLR API](https://flank-vlr-api.vercel.app/) - The v2 API powering Flank's VLR.gg data
+- [Flank VLR API](https://flank-vlr-api.vercel.app/) - The API in `api/` powering Flank's VLR.gg data, built on [vlrggapi](https://github.com/axsddlr/vlrggapi) by Andre Saddler

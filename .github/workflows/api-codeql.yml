@@ -1,10 +1,16 @@
-name: CodeQL
+name: API CodeQL
 
 on:
   push:
-    branches: [master]
+    branches: [dev, main]
+    paths:
+      - "api/**"
+      - ".github/workflows/api-codeql.yml"
   pull_request:
-    branches: [master]
+    branches: [dev, main]
+    paths:
+      - "api/**"
+      - ".github/workflows/api-codeql.yml"
   schedule:
     - cron: "32 7 * * 1"
 
@@ -26,6 +32,9 @@ jobs:
         uses: github/codeql-action/init@v4.39.3
         with:
           languages: python
+          config: |
+            paths:
+              - api
           queries: security-extended
 
       - name: Perform CodeQL analysis

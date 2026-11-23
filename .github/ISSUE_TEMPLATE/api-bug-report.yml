@@ -1,5 +1,5 @@
-name: 🐞 Bug report
-description: Create a report to help us improve
+name: 🐞 API bug report
+description: Report a problem with the vlrggapi data service in api/
 labels: [bug]
 body:
   - type: input

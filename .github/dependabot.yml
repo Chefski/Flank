@@ -27,7 +27,7 @@ updates:
           - "major"
 
   - package-ecosystem: "uv"
-    directory: "/"
+    directory: "/api"
     schedule:
       interval: "weekly"
       day: "wednesday"
@@ -55,7 +55,7 @@ updates:
           - "major"
 
   - package-ecosystem: "docker"
-    directory: "/"
+    directory: "/api"
     schedule:
       interval: "weekly"
       day: "friday"
