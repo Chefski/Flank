@@ -42,13 +42,21 @@ uv run python main.py   # serves on http://127.0.0.1:3001
 Point a Debug build of the app at the local server with the launch argument
 `-FLANKAPIHost http://127.0.0.1:3001`.
 
-`api/` was imported with `git subtree`, keeping its history. To pull fixes from
-the original upstream project:
+`api/` was squashed in from [Chefski/vlrggapi](https://github.com/Chefski/vlrggapi),
+which keeps its earlier history. Because this repo doesn't share that history,
+upstream fixes are applied as a diff from the last synced upstream commit:
 
 ```sh
-git remote add vlrggapi-upstream https://github.com/axsddlr/vlrggapi.git   # once
-git subtree pull --prefix=api vlrggapi-upstream master
+# Last synced axsddlr/vlrggapi commit; update it after each sync.
+LAST_SYNC=1cb73ceb8123c89e586a3862eaf544021294dd10
+
+git fetch https://github.com/axsddlr/vlrggapi.git master
+git diff "$LAST_SYNC" FETCH_HEAD -- . ':!.github' | git apply --3way --directory=api
+git rev-parse FETCH_HEAD   # new LAST_SYNC
 ```
+
+Upstream workflow changes (`.github/`) are left out; port any you want to the
+`api-*.yml` workflows by hand.
 
 `api/WORKFLOW.md` and the API README describe the API's earlier single-branch
 (`master`) setup; in this repo the API follows the same `dev`/`main` flow as the app.
