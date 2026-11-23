@@ -66,8 +66,8 @@ struct NewsView: View {
         default:
             ScrollView(showsIndicators: false) {
                 LazyVStack(spacing: 10) {
-                    if case .cachedOffline = news.state {
-                        cachedNewsNotice
+                    if case .showingSaved(_, let isOffline) = news.state {
+                        cachedNewsNotice(isOffline: isOffline)
                     }
 
                     ForEach(news.articles) { article in
@@ -83,10 +83,10 @@ struct NewsView: View {
         }
     }
 
-    private var cachedNewsNotice: some View {
+    private func cachedNewsNotice(isOffline: Bool) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "wifi.slash")
-            Text("Showing saved news")
+            Image(systemName: isOffline ? "wifi.slash" : "exclamationmark.icloud")
+            (isOffline ? Text("Offline — showing saved news") : Text("Couldn’t refresh — showing saved news"))
                 .font(.subheadline)
             Spacer()
             Button("Retry") {

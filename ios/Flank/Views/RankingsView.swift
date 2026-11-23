@@ -164,7 +164,7 @@ struct RankingsView: View {
                     retryToken += 1
                 }
                 .padding(.top, 30)
-            case .empty, .loaded, .cachedOffline:
+            case .empty, .loaded, .showingSaved:
                 ContentUnavailableView(
                     "No rankings for this region",
                     systemImage: "medal",
@@ -174,9 +174,14 @@ struct RankingsView: View {
             }
         } else {
             LazyVStack {
-                if case .cachedOffline(let message) = rankings.state {
-                    OfflineBanner(text: "Offline — showing saved rankings", detail: message)
-                        .padding(.horizontal, 8)
+                if case .showingSaved(let message, let isOffline) = rankings.state {
+                    SavedDataBanner(
+                        offlineText: "Offline — showing saved rankings",
+                        failedText: "Couldn’t refresh — showing saved rankings",
+                        message: message,
+                        isOffline: isOffline
+                    )
+                    .padding(.horizontal, 8)
                 }
                 if filteredRankings.isEmpty {
                     ContentUnavailableView.search(text: searchText)

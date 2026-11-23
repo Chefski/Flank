@@ -184,8 +184,8 @@ struct HomeView: View {
                     .scrollIndicators(.hidden)
                     .scrollTargetBehavior(.viewAligned)
                 }
-                if case .cachedOffline(let message) = liveMatches.state {
-                    cachedBanner(message)
+                if case .showingSaved(let message, let isOffline) = liveMatches.state {
+                    cachedBanner(message, isOffline: isOffline)
                 }
             }
         }
@@ -246,8 +246,8 @@ struct HomeView: View {
         emptyTitle: String,
         @ViewBuilder card: @escaping (V3Match) -> Card
     ) -> some View {
-        if case .cachedOffline(let message) = state {
-            cachedBanner(message)
+        if case .showingSaved(let message, let isOffline) = state {
+            cachedBanner(message, isOffline: isOffline)
         }
 
         if matches.isEmpty {
@@ -261,7 +261,7 @@ struct HomeView: View {
                     Analytics.track(.retryTapped(surface: "matches_\(selectedTab.lowercased())"))
                     listRetryToken += 1
                 }
-            case .empty, .loaded, .cachedOffline:
+            case .empty, .loaded, .showingSaved:
                 ContentUnavailableView(
                     emptyTitle,
                     systemImage: isFilteringFavorites
@@ -277,9 +277,14 @@ struct HomeView: View {
         }
     }
 
-    private func cachedBanner(_ message: String) -> some View {
-        OfflineBanner(text: "Offline — showing saved matches", detail: message)
-            .padding(.horizontal)
+    private func cachedBanner(_ message: String, isOffline: Bool) -> some View {
+        SavedDataBanner(
+            offlineText: "Offline — showing saved matches",
+            failedText: "Couldn’t refresh — showing saved matches",
+            message: message,
+            isOffline: isOffline
+        )
+        .padding(.horizontal)
     }
 
     private func compactStatus(
@@ -319,19 +324,32 @@ struct HomeView: View {
     }
 }
 
-/// "Showing saved data" notice for list screens that fell back to their offline cache.
-struct OfflineBanner: View {
-    let text: String
-    let detail: String
+/// Notice for list screens showing their saved copy after a refresh failed. It only
+/// says "Offline" when the connection was the problem; otherwise it shows the reason,
+/// such as a server error, so a broken data service isn't mistaken for no signal.
+struct SavedDataBanner: View {
+    let offlineText: LocalizedStringKey
+    let failedText: LocalizedStringKey
+    let message: String
+    let isOffline: Bool
 
     var body: some View {
-        Label(text, systemImage: "icloud.slash")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .accessibilityHint(detail)
+        VStack(alignment: .leading, spacing: 4) {
+            Label(
+                isOffline ? offlineText : failedText,
+                systemImage: isOffline ? "icloud.slash" : "exclamationmark.icloud"
+            )
+            if !isOffline {
+                Text(message)
+                    .font(.caption)
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .combine)
     }
 }
 

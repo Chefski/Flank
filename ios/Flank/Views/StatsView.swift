@@ -123,7 +123,7 @@ struct StatsView: View {
                     retryToken += 1
                 }
                 .padding(.top, 30)
-            case .empty, .loaded, .cachedOffline:
+            case .empty, .loaded, .showingSaved:
                 ContentUnavailableView(
                     "No player stats",
                     systemImage: "chart.bar",
@@ -132,9 +132,14 @@ struct StatsView: View {
                 .padding(.top, 30)
             }
         } else {
-            if case .cachedOffline(let message) = statsVM.state {
-                OfflineBanner(text: "Offline — showing saved stats", detail: message)
-                    .padding(.horizontal)
+            if case .showingSaved(let message, let isOffline) = statsVM.state {
+                SavedDataBanner(
+                    offlineText: "Offline — showing saved stats",
+                    failedText: "Couldn’t refresh — showing saved stats",
+                    message: message,
+                    isOffline: isOffline
+                )
+                .padding(.horizontal)
             }
             ForEach(statsVM.stats, id: \.identityKey) { stat in
                 PlayerStatTab(stat: stat)

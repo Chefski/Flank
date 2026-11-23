@@ -11,18 +11,20 @@ enum ListLoadState: Equatable {
     case loading
     case loaded
     case empty
-    case cachedOffline(String)
+    /// A refresh failed, so the saved copy stays on screen. `isOffline` is true only
+    /// when the connection was the problem, not the server or the data.
+    case showingSaved(message: String, isOffline: Bool)
     case failed(message: String, retryable: Bool)
 
-    /// The state after a failed load. Content already on screen stays visible and is
-    /// marked as offline; otherwise the screen shows an error with an optional retry.
+    /// The state after a failed load. Content already on screen stays visible with a
+    /// notice saying why; otherwise the screen shows an error with an optional retry.
     @MainActor
     static func afterFailure(_ error: Error, hasContent: Bool, surface: String) -> ListLoadState {
         let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         let category = AnalyticsErrorCategory(error)
         if hasContent {
             Analytics.track(.offlineCachePresented(surface: surface, category: category))
-            return .cachedOffline(message)
+            return .showingSaved(message: message, isOffline: category == .offline)
         }
         let retryable = (error as? VLRAPIError)?.isRetryable ?? true
         Analytics.track(.loadFailed(surface: surface, category: category, retryable: retryable))

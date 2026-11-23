@@ -292,7 +292,13 @@ final class V3MatchAPITests: XCTestCase {
 
         XCTAssertEqual(
             ListLoadState.afterFailure(error, hasContent: true, surface: "test"),
-            .cachedOffline(error.errorDescription ?? "")
+            .showingSaved(message: error.errorDescription ?? "", isOffline: true)
+        )
+        // A server error with saved content must not be reported as being offline.
+        let serverError = VLRAPIError.httpStatus(502)
+        XCTAssertEqual(
+            ListLoadState.afterFailure(serverError, hasContent: true, surface: "test"),
+            .showingSaved(message: serverError.errorDescription ?? "", isOffline: false)
         )
         XCTAssertEqual(
             ListLoadState.afterFailure(error, hasContent: false, surface: "test"),
