@@ -80,6 +80,8 @@ Interactive Swagger docs are available at `/`.
 - **Rate limit** - endpoint tiers allow 200 cheap, 60 moderate, or 20 expensive requests per minute per client
 - **Error handling** - V2 and V3 return HTTP errors for invalid input and propagate upstream failures with HTTP error codes
 - **Deployment targets** - Vercel for the hosted API, Docker for containerized self-hosting
+- **Edge caching** - successful GETs send `s-maxage`/`stale-while-revalidate` derived from the cache TTLs below
+- **Daily parse check** - `.github/workflows/selector-check.yml` validates selectors and the Flank endpoint contract (`tests/test_live_contract.py`) against live vlr.gg every day
 
 ## V3 Endpoint Overview
 
@@ -1041,7 +1043,29 @@ V2 endpoints use an in-memory TTL cache to reduce load on vlr.gg. Cache duration
 | Rankings | 1 hour |
 | Team transactions | 1 hour |
 
-Original endpoints are not cached.
+Original endpoints share the same scraper caches.
+
+### Shared-cache (CDN) headers
+
+Successful `GET` responses also carry
+`Cache-Control: public, max-age=0, s-maxage=<TTL above>, stale-while-revalidate=<SWR>`
+so the Vercel edge (or any shared cache) can absorb repeat traffic across cold
+starts. `stale-while-revalidate` is half the TTL for live scores and results and
+twice the TTL (capped at a day) elsewhere. Match detail uses the live TTL while a
+match is live. Errors, 429s and embedded upstream errors get `no-store`, a `304`
+gets `private, max-age=0, must-revalidate`, and `/health` is never shared-cached.
+See `utils/cache_headers.py`.
+
+### Team logos in V3 match lists
+
+vlr.gg's list pages carry no team logos, so `/v3/matches` and
+`/v3/events/{id}/matches` fill `teams[].image` (and the team `id`/`url`) from a
+24-hour logo index fed by every match, team, rankings and live-score page the API
+scrapes. Missing entries are filled by fetching at most 10 match pages per
+request (4 at a time across all requests, waiting at most 2.5 s). A list that
+still has gaps is edge-cached for 15 seconds instead of its usual TTL, so it fills
+in after a request or two. See `utils/team_logos.py` and
+`api/team_logo_enrichment.py`.
 
 ## Installation
 

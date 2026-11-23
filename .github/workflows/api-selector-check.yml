@@ -1,5 +1,13 @@
 name: API vlr.gg selector check
 
+# Daily guard against vlr.gg layout changes, in two layers:
+#   1. tests/test_vlr_selectors.py - every CSS selector the scrapers use still
+#      resolves on live pages (upstream's structural check);
+#   2. tests/test_live_contract.py - the endpoints the Flank iOS app depends on
+#      (V3 match lists/detail/news, V2 rankings/stats/team/player) still return
+#      populated payloads when the real app runs against live vlr.gg.
+# Either failing turns the run red and opens/updates one tracking issue.
+
 on:
   schedule:
     - cron: "0 6 * * *" # daily at 06:00 UTC
@@ -7,6 +15,7 @@ on:
   push:
     paths:
       - "api/tests/test_vlr_selectors.py"
+      - "api/tests/test_live_contract.py"
       - ".github/workflows/api-selector-check.yml"
 
 # The repo default workflow token is read-write. This job reads code, parses
@@ -18,11 +27,11 @@ permissions:
 jobs:
   check-selectors:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: api
-    # UV_PYTHON wins over .python-version, which pins 3.11.
+    # UV_PYTHON wins over .python-version.
     env:
       UV_PYTHON: "3.12"
 
@@ -49,16 +58,31 @@ jobs:
           PYTHONPATH: "."
         run: uv run pytest tests/test_vlr_selectors.py -v --tb=short
 
+      - name: Run Flank endpoint contract check
+        id: contract
+        continue-on-error: true
+        env:
+          CI: "true"
+          VLR_LIVE_CONTRACT: "1"
+          PYTHONPATH: "."
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run pytest tests/test_live_contract.py -v --tb=line -rfE -p no:cacheprovider \
+            2>&1 | tee contract-report.txt
+
       - name: Upload report artifact
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: selector-report
-          path: api/selector-report.json
+          path: |
+            api/selector-report.json
+            api/contract-report.txt
           retention-days: 7
 
       - name: Create issue on failure
-        if: steps.check.outcome == 'failure'
+        if: steps.check.outcome == 'failure' || steps.contract.outcome == 'failure'
         uses: actions/github-script@v9
         with:
           script: |
@@ -194,7 +218,7 @@ jobs:
                     `still exists on the page. If the layout changed, update or add a fallback ` +
                     `selector in \`${r.source}\`. If its absence is explained — a rare data ` +
                     `state or a page-level markup variant — add it to \`data_conditional\` in ` +
-                    `\`tests/test_vlr_selectors.py\`. |`
+                    `\`api/tests/test_vlr_selectors.py\`. |`
                   );
                 }
               }
@@ -212,6 +236,39 @@ jobs:
               for (const r of fetchErrors) {
                 lines.push(`- **${r.page}** (${(r.urls || []).join(", ")}): ${r.fetch_error}`);
               }
+              lines.push("");
+            }
+
+            // Flank endpoint contract check (tests/test_live_contract.py)
+            let contractLog = "";
+            try {
+              contractLog = fs.readFileSync("api/contract-report.txt", "utf8");
+            } catch {
+              contractLog = "";
+            }
+            const contractFailures = contractLog
+              .split("\n")
+              .filter(line => /^(FAILED|ERROR) /.test(line));
+            if ("${{ steps.contract.outcome }}" === "failure") {
+              lines.push("### Flank endpoint contract check failed");
+              lines.push("");
+              lines.push(
+                "The app ran in-process against live vlr.gg and an endpoint the Flank iOS app " +
+                "depends on returned an error or an under-populated payload. Selectors can all " +
+                "still resolve while this fails (a field moved, a filter stopped echoing)."
+              );
+              lines.push("");
+              if (contractFailures.length > 0) {
+                lines.push("```");
+                for (const line of contractFailures.slice(0, 30)) lines.push(line);
+                lines.push("```");
+              } else {
+                lines.push("_No FAILED lines were captured; see `contract-report.txt` in the run artifacts._");
+              }
+              lines.push("");
+              lines.push(
+                "Reproduce locally from `api/` with `VLR_LIVE_CONTRACT=1 uv run pytest tests/test_live_contract.py -v`."
+              );
               lines.push("");
             }
 
@@ -269,6 +326,6 @@ jobs:
       # `continue-on-error` above keeps the report/issue steps running, but the
       # job must still go red so the scheduled failure (and its notification)
       # is not silent.
-      - name: Fail the run when selectors broke
-        if: steps.check.outcome == 'failure'
+      - name: Fail the run when selectors or the endpoint contract broke
+        if: steps.check.outcome == 'failure' || steps.contract.outcome == 'failure'
         run: exit 1

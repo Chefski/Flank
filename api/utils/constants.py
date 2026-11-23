@@ -82,6 +82,23 @@ CACHE_TTL_EVENT_NEWS = 600
 CACHE_TTL_EVENT_PICKEM = 300
 CACHE_TTL_HEALTH_UPSTREAM = 60
 
+# Team logos are effectively static, so the per-match / per-team logo index
+# outlives every payload cache. See utils/team_logos.py.
+CACHE_TTL_TEAM_LOGO = 86400
+TEAM_LOGO_CACHE_SIZE = 4096
+# A match page that could not be fetched is not retried for this long.
+TEAM_LOGO_MISS_TTL = 600
+# Match-list logo enrichment: at most this many match pages are fetched for
+# one list request, this many at once across all requests, and the request
+# waits at most this long for them before responding with what it has.
+TEAM_LOGO_ENRICH_MAX_PER_REQUEST = 10
+TEAM_LOGO_ENRICH_CONCURRENCY = 4
+TEAM_LOGO_ENRICH_BUDGET_SECONDS = 2.5
+TEAM_LOGO_ENRICH_FETCH_TIMEOUT = 8
+# Edge lifetime for a list response that still has fetchable logo gaps, so the
+# next request (after the in-flight fetches land) is not held off for long.
+CACHE_TTL_PARTIAL_LOGOS = 15
+
 # /stats region vocabulary
 # The /stats page uses a DIFFERENT region taxonomy from /rankings. vlr.gg's
 # filter form submits exactly these canonical values (as ``region[]`` checkboxes

@@ -5,6 +5,7 @@ from utils.constants import CACHE_TTL_RANKINGS, VLR_RANKINGS_URL
 from utils.error_handling import handle_scraper_errors, raise_for_upstream_status, validate_region
 from utils.html_parsers import add_image_variants, parse_html
 from utils.http_client import fetch_theme_variants, get_http_client
+from utils.team_logos import team_logo_store
 
 
 def _normalize_text(value: str) -> str:
@@ -160,6 +161,7 @@ async def vlr_rankings(region_key):
                 dark_item = dark_result[index]
             add_image_variants(item, dark_item)
             add_image_variants(item, dark_item, "last_played_team_logo")
+            team_logo_store.record_team(item, name=item["team"])
 
         data = {"data": {"status": status, "segments": result}}
 
