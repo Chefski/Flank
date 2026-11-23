@@ -528,3 +528,35 @@ def test_match_detail_adapter_maps_the_redesigned_ecm_economy():
     assert (row.low.rounds, row.low.wins) == (None, None)
     assert (row.medium.rounds, row.medium.wins) == (None, None)
     assert (row.full.rounds, row.full.wins) == (11, 9)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("query,light", [("", False), ("?light=true", True), ("?light=false", False)])
+async def test_v3_match_detail_passes_light_through(client, monkeypatch, query, light):
+    seen: list[bool] = []
+
+    async def fake_detail(match_id, light=False):
+        seen.append(light)
+        return {
+            "data": {
+                "status": 200,
+                "segments": [
+                    {
+                        "match_id": match_id,
+                        "url": f"https://www.vlr.gg/{match_id}",
+                        "status": "Upcoming",
+                        "teams": [{"id": "1", "name": "A"}, {"id": "2", "name": "B"}],
+                    }
+                ],
+            }
+        }
+
+    monkeypatch.setattr("routers.v3_router.get_match_detail_data", fake_detail)
+
+    resp = await client.get(f"/v3/matches/42{query}")
+
+    assert resp.status_code == 200
+    assert resp.json()["data"]["id"] == 42
+    assert seen == [light]
+    # The edge keys on the full URL, so light and full payloads never mix.
+    assert "public" in resp.headers["cache-control"]

@@ -452,3 +452,43 @@ def test_parse_event_teams_exposes_the_qualifier_event_id():
 )
 def test_qualifier_event_id_only_accepts_vlr_event_paths(href, expected):
     assert _qualifier_event_id(href) == expected
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("status", [403, 429, 503])
+async def test_live_events_report_homepage_pushback_instead_of_an_empty_list(monkeypatch, status):
+    cache_manager.clear_all()
+    client = FakeAsyncClient({"https://www.vlr.gg": FakeResponse(status)})
+    monkeypatch.setattr("api.scrapers.events.get_http_client", lambda: client)
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr("utils.http_client.asyncio.sleep", no_sleep)
+
+    result = await events_module.vlr_events(upcoming=False, completed=False, live=True)
+
+    assert result["data"]["status"] == status
+    assert result["data"]["error"]
+    assert cache_manager.last_good("events", False, False, 1, True) is None
+    cache_manager.clear_all()
+
+
+@pytest.mark.anyio
+async def test_live_events_fall_back_to_the_last_good_list_on_pushback(monkeypatch):
+    cache_manager.clear_all()
+    home = """
+    <html><body><div class="js-home-events">
+      <div class="wf-label">live</div>
+    </div>{pad}</body></html>
+    """.format(pad="x" * 200)
+    client = FakeAsyncClient({"https://www.vlr.gg": FakeResponse(200, home)})
+    monkeypatch.setattr("api.scrapers.events.get_http_client", lambda: client)
+
+    good = await events_module.vlr_events(upcoming=False, completed=False, live=True)
+    assert good["data"]["status"] == 200
+
+    cache_manager._caches.clear()
+    client.responses["https://www.vlr.gg"] = FakeResponse(429)
+    assert await events_module.vlr_events(upcoming=False, completed=False, live=True) == good
+    cache_manager.clear_all()

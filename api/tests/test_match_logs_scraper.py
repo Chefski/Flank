@@ -1,10 +1,16 @@
 """Tests for the match logs (2D replay) scraper — vlr.gg 'logs' tab."""
+import asyncio
 import json
 
 import pytest
 
 from api.scrapers.match_logs import parse_logs, vlr_match_logs
 from utils.cache_manager import cache_manager
+from utils.constants import (
+    CACHE_TTL_MATCH_DETAIL,
+    CACHE_TTL_MATCH_DETAIL_LIVE,
+    CACHE_TTL_STALE_FALLBACK_EDGE,
+)
 from utils.html_parsers import parse_html
 
 # Trimmed from https://www.vlr.gg/766311/?game=285688&tab=logs (2026-10).
@@ -270,9 +276,9 @@ async def test_vlr_match_logs_parses_rounds(monkeypatch):
         "victim": "bstrdd", "victim_team": 2, "source": "Headhunter",
         "pos": {"x": 562.3, "y": 584.8}, "from": {"x": 530.7, "y": 707.5},
         "positions": [
-            {"player": "mizzy", "team": 2, "x": 967.4, "y": 418.8, "hp": 112},
-            {"player": "Tastyy", "team": 1, "x": 530.7, "y": 707.5, "hp": 285},
-            {"player": "Ivy", "team": 1, "x": 170.7, "y": 663.5, "hp": 255},
+            {"player": "mizzy", "team": 2, "x": 967.4, "y": 418.8, "facing": 112, "hp": 112},
+            {"player": "Tastyy", "team": 1, "x": 530.7, "y": 707.5, "facing": 285, "hp": 285},
+            {"player": "Ivy", "team": 1, "x": 170.7, "y": 663.5, "facing": 255, "hp": 255},
         ],
     }
     assert plant["type"] == "plant"
@@ -327,3 +333,128 @@ async def test_vlr_match_logs_returns_no_rounds_when_game_has_no_replay(monkeypa
     assert segment["rounds"] == []
     assert segment["game_id"] == "285690"
     cache_manager.clear_all()
+
+
+# --- caching: TTL follows whether the replay can still grow ------------------
+
+LOGS_TAB_FINAL_HTML = LOGS_TAB_HTML.replace(
+    "<html><body>", '<html><body><div class="match-header-vs-note">final</div>', 1
+)
+LOGS_URL = "https://www.vlr.gg/766311/?game=285688&tab=logs"
+LOGS_KEY = ("match_logs", "766311", "285688")
+
+
+async def _logs_with_hints(*args):
+    from utils.cache_headers import _edge_hints
+
+    hints: dict = {}
+    token = _edge_hints.set(hints)
+    try:
+        return await vlr_match_logs(*args), hints
+    finally:
+        _edge_hints.reset(token)
+
+
+@pytest.mark.anyio
+async def test_replay_of_a_map_in_progress_is_cached_briefly(monkeypatch):
+    cache_manager.clear_all()
+    _patch_fetch(monkeypatch, {LOGS_URL: FakeResponse(200, LOGS_TAB_HTML)})  # 2-0, not over
+
+    data, hints = await _logs_with_hints("766311", "285688")
+
+    assert cache_manager.get(CACHE_TTL_MATCH_DETAIL_LIVE, *LOGS_KEY) is data
+    assert cache_manager.get(CACHE_TTL_MATCH_DETAIL, *LOGS_KEY) is None
+    assert hints == {"cap": CACHE_TTL_MATCH_DETAIL_LIVE}
+    cache_manager.clear_all()
+
+
+@pytest.mark.anyio
+async def test_empty_replay_is_cached_briefly(monkeypatch):
+    cache_manager.clear_all()
+    _patch_fetch(
+        monkeypatch,
+        {"https://www.vlr.gg/766311/?game=285690&tab=logs": FakeResponse(200, LOGS_TAB_EMPTY_HTML)},
+    )
+
+    data, hints = await _logs_with_hints("766311", "285690")
+
+    assert cache_manager.get(CACHE_TTL_MATCH_DETAIL_LIVE, "match_logs", "766311", "285690") is data
+    assert hints == {"cap": CACHE_TTL_MATCH_DETAIL_LIVE}
+    cache_manager.clear_all()
+
+
+@pytest.mark.anyio
+async def test_replay_of_a_finished_match_keeps_the_full_ttl(monkeypatch):
+    cache_manager.clear_all()
+    calls = _patch_fetch(monkeypatch, {LOGS_URL: FakeResponse(200, LOGS_TAB_FINAL_HTML)})
+
+    data, hints = await _logs_with_hints("766311", "285688")
+    again, again_hints = await _logs_with_hints("766311", "285688")
+
+    assert again is data
+    assert calls == [LOGS_URL]
+    assert cache_manager.get(CACHE_TTL_MATCH_DETAIL, *LOGS_KEY) is data
+    assert hints == {} and again_hints == {}
+    cache_manager.clear_all()
+
+
+@pytest.mark.anyio
+async def test_logs_serve_the_last_good_replay_on_pushback(monkeypatch):
+    cache_manager.clear_all()
+    responses = {LOGS_URL: FakeResponse(200, LOGS_TAB_FINAL_HTML)}
+    _patch_fetch(monkeypatch, responses)
+    good = await vlr_match_logs("766311", "285688")
+
+    cache_manager._caches.clear()
+    responses[LOGS_URL] = FakeResponse(429, "")
+    stale, hints = await _logs_with_hints("766311", "285688")
+
+    assert stale is good
+    assert hints == {"cap": CACHE_TTL_STALE_FALLBACK_EDGE, "stale": True}
+    cache_manager.clear_all()
+
+
+@pytest.mark.anyio
+async def test_concurrent_logs_requests_share_one_fetch(monkeypatch):
+    cache_manager.clear_all()
+    calls: list[str] = []
+
+    async def slow_fetch(url, *, client=None, timeout=None, **kwargs):
+        calls.append(url)
+        await asyncio.sleep(0)
+        return FakeResponse(200, LOGS_TAB_FINAL_HTML)
+
+    monkeypatch.setattr("api.scrapers.match_logs.fetch_with_retries", slow_fetch)
+
+    first, second = await asyncio.gather(
+        vlr_match_logs("766311", "285688"), vlr_match_logs("766311", "285688")
+    )
+
+    assert first is second
+    assert calls == [LOGS_URL]
+    cache_manager.clear_all()
+
+
+@pytest.mark.parametrize(
+    "last_score,may_grow",
+    [
+        ({"team1": 13, "team2": 11}, False),
+        ({"team1": 9, "team2": 13}, False),
+        ({"team1": 13, "team2": 12}, True),  # overtime: not over yet
+        ({"team1": 2, "team2": 0}, True),
+    ],
+)
+def test_map_is_over_once_the_last_round_score_is_decisive(last_score, may_grow):
+    from api.scrapers.match_logs import _replay_may_grow
+
+    rounds = [{"score": {"team1": 0, "team2": 1}}, {"score": last_score}]
+    assert _replay_may_grow(parse_html("<html></html>"), rounds) is may_grow
+
+
+@pytest.mark.parametrize("note", ["final", "Completed", "FINAL"])
+def test_replay_is_settled_when_the_header_says_the_match_is_over(note):
+    from api.scrapers.match_logs import _replay_may_grow
+
+    html = parse_html(f'<div class="match-header-vs-note">{note}</div>')
+    rounds = [{"score": {"team1": 12, "team2": 11}}]
+    assert _replay_may_grow(html, rounds) is False

@@ -1,6 +1,8 @@
 """
 Configuration constants for VLR.GG API
 """
+import math
+import os
 
 # Base URLs
 VLR_BASE_URL = "https://www.vlr.gg"
@@ -41,6 +43,45 @@ PAGINATION_SEMAPHORE_LIMIT = 4
 CIRCUIT_FAIL_MAX = 5
 CIRCUIT_RESET_TIMEOUT = 30.0
 
+
+def _env_float(name: str, default: float) -> float:
+    """A finite float from the environment, or ``default`` if unset or invalid."""
+    try:
+        value = float(os.environ.get(name, default))
+    except ValueError:
+        return default
+    return value if math.isfinite(value) else default
+
+
+# Upstream politeness (utils.http_client.UpstreamGuard). Every request to
+# vlr.gg from this process, whichever scraper sends it, shares these limits.
+# They are per process: on Vercel each warm instance has its own budget.
+#   - at most UPSTREAM_MAX_CONCURRENCY requests in flight at once;
+#   - request starts spaced at least UPSTREAM_MIN_INTERVAL seconds apart;
+#   - a 403 or 429 (or a 503 with Retry-After) pauses every request to the
+#     host for the longer of Retry-After and an escalating cooldown, which
+#     starts at UPSTREAM_COOLDOWN_BASE and doubles on each repeat up to
+#     UPSTREAM_COOLDOWN_MAX, resetting after the next success.
+UPSTREAM_MAX_CONCURRENCY = int(_env_float("VLR_MAX_CONCURRENCY", 6))
+UPSTREAM_MIN_INTERVAL = _env_float("VLR_MIN_REQUEST_INTERVAL", 0.1)
+UPSTREAM_COOLDOWN_BASE = 60.0
+UPSTREAM_COOLDOWN_MAX = 900.0
+# Retry-After is honoured above UPSTREAM_COOLDOWN_MAX, but never beyond this.
+UPSTREAM_RETRY_AFTER_CAP = 3600.0
+# A request waits at most this long for a free slot, then fails fast with
+# UpstreamBusyError (503, or the last good payload) instead of queueing.
+UPSTREAM_SLOT_WAIT_TIMEOUT = 15.0
+
+# A light-theme image URL's dark-theme counterpart, learned whenever both
+# themes of a page are fetched, so later pages whose images are all known can
+# skip the second (dark) request. See utils.http_client.ThemeImageMap.
+THEME_IMAGE_MAP_TTL = 86400
+THEME_IMAGE_MAP_SIZE = 20000
+
+# How long the last successful payload for a cache key is kept so it can be
+# served when vlr.gg is unavailable, rate limiting, or cooling down.
+STALE_FALLBACK_TTL = 6 * 3600
+
 # Request hardening limits for expensive paginated scrapes
 MAX_MATCH_PAGE_WINDOW = 20
 MAX_MATCH_QUERY_BOUND = 100
@@ -67,6 +108,9 @@ CACHE_MAX_SIZE = 1000
 # Cache TTLs — new scraper endpoints
 CACHE_TTL_MATCH_DETAIL = 300
 CACHE_TTL_MATCH_DETAIL_LIVE = 30
+# A finished match only changes when VODs are attached, so it can sit in the
+# caches far longer than an upcoming one.
+CACHE_TTL_MATCH_DETAIL_FINAL = 3600
 CACHE_TTL_PLAYER = 1800
 CACHE_TTL_PLAYER_MATCHES = 600
 CACHE_TTL_TEAM = 1800
@@ -98,6 +142,9 @@ TEAM_LOGO_ENRICH_FETCH_TIMEOUT = 8
 # Edge lifetime for a list response that still has fetchable logo gaps, so the
 # next request (after the in-flight fetches land) is not held off for long.
 CACHE_TTL_PARTIAL_LOGOS = 15
+# Edge lifetime for a last-good payload served because a refresh failed, so
+# the edge asks again soon instead of pinning old data for the route's TTL.
+CACHE_TTL_STALE_FALLBACK_EDGE = 30
 
 # /stats region vocabulary
 # The /stats page uses a DIFFERENT region taxonomy from /rankings. vlr.gg's

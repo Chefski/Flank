@@ -42,6 +42,16 @@ uv run python main.py   # serves on http://127.0.0.1:3001
 Point a Debug build of the app at the local server with the launch argument
 `-FLANKAPIHost http://127.0.0.1:3001`.
 
+Upstream politeness settings (environment variables on the API deployment):
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `VLR_USER_AGENT` | a desktop Chrome string | User-Agent sent to vlr.gg. Set it to something identifiable (bot name + contact) so vlr.gg can allowlist or contact us instead of blocking. |
+| `VLR_MAX_CONCURRENCY` | `6` | Requests to vlr.gg in flight at once, per instance. |
+| `VLR_MIN_REQUEST_INTERVAL` | `0.1` | Minimum seconds between request starts, per instance. |
+
+A 403/429 from vlr.gg is never retried: it pauses all requests to vlr.gg for the instance (Retry-After, or 60 s doubling to 15 min), and the API serves the last good payload (up to 6 h old) in the meantime.
+
 `api/` was squashed in from [Chefski/vlrggapi](https://github.com/Chefski/vlrggapi),
 which keeps its earlier history. Because this repo doesn't share that history,
 upstream fixes are applied as a diff from the last synced upstream commit:

@@ -1,5 +1,6 @@
 import asyncio
 
+import httpx
 import pytest
 
 from api.scrapers.news import vlr_news, vlr_news_article
@@ -153,7 +154,7 @@ async def test_vlr_news_parses_fixture_shape(monkeypatch):
         "url": "https://www.vlr.gg/123/example-news",
         "url_path": "https://www.vlr.gg/123/example-news",
     }
-    assert client.calls == [("https://www.vlr.gg/news", None)]
+    assert client.calls == [("https://www.vlr.gg/news", httpx.USE_CLIENT_DEFAULT)]
     cache_manager.clear_all()
 
 
@@ -181,7 +182,7 @@ async def test_vlr_news_parses_live_like_markup_without_raw_text_splitting(monke
     assert second["article_id"] == "644767"
     assert second["region_code"] == "us"
     assert second["description"].startswith("After a long spell with Sen City")
-    assert client.calls == [("https://www.vlr.gg/news", None)]
+    assert client.calls == [("https://www.vlr.gg/news", httpx.USE_CLIENT_DEFAULT)]
     cache_manager.clear_all()
 
 
@@ -199,7 +200,7 @@ async def test_vlr_news_fetches_requested_archive_page(monkeypatch):
         "has_previous": True,
         "has_next": True,
     }
-    assert client.calls == [("https://www.vlr.gg/news/?page=2", None)]
+    assert client.calls == [("https://www.vlr.gg/news/?page=2", httpx.USE_CLIENT_DEFAULT)]
     cache_manager.clear_all()
 
 
@@ -250,7 +251,7 @@ async def test_vlr_news_article_parses_metadata_content_links_and_media(monkeypa
     assert article["comments_url"] == (
         "https://www.vlr.gg/123/example-news#comments"
     )
-    assert client.calls == [("https://www.vlr.gg/123", None)]
+    assert client.calls == [("https://www.vlr.gg/123", httpx.USE_CLIENT_DEFAULT)]
     cache_manager.clear_all()
 
 
@@ -282,5 +283,5 @@ async def test_vlr_news_coalesces_concurrent_cache_misses(monkeypatch):
     first, second = await asyncio.gather(vlr_news(), vlr_news())
 
     assert first == second
-    assert client.calls == [("https://www.vlr.gg/news", None)]
+    assert client.calls == [("https://www.vlr.gg/news", httpx.USE_CLIENT_DEFAULT)]
     cache_manager.clear_all()

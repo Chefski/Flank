@@ -7,6 +7,37 @@ import EventKit
 import FluidGradient
 import SwiftUI
 
+/// When the match screen refreshes itself.
+enum MatchDetailAutoRefresh {
+    /// The API's edge cache holds live matches for 30 s, so polling at that rate adds
+    /// no load on vlr.gg.
+    static let liveInterval: TimeInterval = 30
+    /// While refreshes keep failing (offline, rate limited, server down).
+    static let failingInterval: TimeInterval = 120
+
+    /// Seconds until the next automatic refresh, or `nil` when the match won't change
+    /// on its own (completed, or no start time to wait for).
+    ///
+    /// Live matches, and scheduled ones past their start time, refresh every 30 s from
+    /// when the last fetch finished. A scheduled match waits until its start time.
+    static func delay(
+        for detail: V3MatchDetail,
+        lastFetchFinishedAt: Date?,
+        isFailing: Bool,
+        now: Date
+    ) -> TimeInterval? {
+        if !detail.mayBeLive(now: now) {
+            guard detail.status == .scheduled, let startsAt = detail.startsAt, startsAt > now else {
+                return nil
+            }
+            return startsAt.timeIntervalSince(now)
+        }
+        let interval = isFailing ? failingInterval : liveInterval
+        let elapsed = lastFetchFinishedAt.map { now.timeIntervalSince($0) } ?? interval
+        return max(0, interval - elapsed)
+    }
+}
+
 @MainActor
 final class MatchDetailViewModel: ObservableObject {
     enum State {
@@ -20,13 +51,42 @@ final class MatchDetailViewModel: ObservableObject {
 
     let matchID: Int
     private let repository: V3MatchDetailRepository
+    /// When the last load finished, successful or not.
+    private(set) var lastFetchFinishedAt: Date?
+    /// Whether the last load failed, so automatic refreshes back off.
+    private(set) var isFailing = false
 
     init(matchID: Int, repository: V3MatchDetailRepository = .shared) {
         self.matchID = matchID
         self.repository = repository
     }
 
+    var loadedDetail: V3MatchDetail? {
+        if case .loaded(let detail, _) = state { return detail }
+        return nil
+    }
+
+    private var isShowingStale: Bool {
+        if case .loaded(_, let isStale) = state { return isStale }
+        return false
+    }
+
+    /// Seconds until the next automatic refresh, or `nil` when none is needed.
+    func autoRefreshDelay(now: Date = Date()) -> TimeInterval? {
+        guard let detail = loadedDetail else { return nil }
+        return MatchDetailAutoRefresh.delay(
+            for: detail,
+            lastFetchFinishedAt: lastFetchFinishedAt,
+            isFailing: isFailing,
+            now: now
+        )
+    }
+
     func load(forceRefresh: Bool = false) async {
+        let wasStale = isShowingStale
+        let wasFailed: Bool
+        if case .failed = state { wasFailed = true } else { wasFailed = false }
+
         if case .loaded = state {
             // Keep cached content visible while an explicit refresh is in flight.
         } else {
@@ -36,7 +96,10 @@ final class MatchDetailViewModel: ObservableObject {
         do {
             let result = try await repository.detail(id: matchID, forceRefresh: forceRefresh)
             try Task.checkCancellation()
-            if result.isStale {
+            lastFetchFinishedAt = Date()
+            isFailing = result.isStale
+            // Report the cached copy once, when the screen falls back to it, not per poll.
+            if result.isStale && !wasStale {
                 Analytics.track(.offlineCachePresented(surface: "match_detail", category: nil))
             }
             state = .loaded(result.detail, isStale: result.isStale)
@@ -44,16 +107,21 @@ final class MatchDetailViewModel: ObservableObject {
             return
         } catch {
             guard !Task.isCancelled else { return }
-            Analytics.track(
-                .loadFailed(
-                    surface: "match_detail",
-                    category: AnalyticsErrorCategory(error),
-                    retryable: (error as? VLRAPIError)?.isRetryable ?? true
+            lastFetchFinishedAt = Date()
+            isFailing = true
+            let retryable = (error as? VLRAPIError)?.isRetryable ?? true
+            if !wasFailed {
+                Analytics.track(
+                    .loadFailed(
+                        surface: "match_detail",
+                        category: AnalyticsErrorCategory(error),
+                        retryable: retryable
+                    )
                 )
-            )
+            }
             state = .failed(
                 message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
-                retryable: (error as? VLRAPIError)?.isRetryable ?? true
+                retryable: retryable
             )
         }
     }
@@ -127,6 +195,14 @@ struct MatchDetailView: View {
     @State private var hasTrackedOpen = false
     @Namespace private var sectionNamespace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// Restarts the auto-refresh loop when the match's status changes or the app
+    /// returns to the foreground.
+    private var liveRefreshID: String {
+        let status = viewModel.loadedDetail?.status.rawValue ?? "none"
+        return "\(viewModel.matchID)-\(status)-\(scenePhase == .active)"
+    }
 
     private let summary: V3Match?
     private let fallbackURL: String?
@@ -186,6 +262,25 @@ struct MatchDetailView: View {
         }
         .task(id: "\(viewModel.matchID)-\(reloadToken)") {
             await viewModel.load()
+        }
+        .task(id: liveRefreshID) {
+            // Live scores refresh on their own while the match is on screen and the app
+            // is in the foreground, counting from the last fetch: coming back after 30 s
+            // or more refreshes straight away. A scheduled match starts refreshing once
+            // its start time passes; failing refreshes back off. See `MatchDetailAutoRefresh`.
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                guard let delay = viewModel.autoRefreshDelay() else { return }
+                if delay > 0 {
+                    do {
+                        try await Task.sleep(for: .seconds(delay))
+                    } catch {
+                        return
+                    }
+                    continue
+                }
+                await viewModel.load(forceRefresh: true)
+            }
         }
         .onAppear {
             guard !hasTrackedOpen else { return }
@@ -448,10 +543,41 @@ struct MatchDetailView: View {
                 if game.sideScores.team1.attack != nil || game.sideScores.team2.attack != nil {
                     SideScoreGrid(sideScores: game.sideScores, teams: detail.teams)
                 }
+
+                if game.status == .completed || game.status == .inProgress {
+                    roundReplayLink(game, detail: detail)
+                }
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel(mapAccessibilityLabel(game, teams: detail.teams))
         }
+    }
+
+    private func roundReplayLink(_ game: V3Game, detail: V3MatchDetail) -> some View {
+        NavigationLink {
+            MatchReplayView(
+                matchID: detail.id,
+                gameID: game.id,
+                mapName: game.mapName,
+                teams: detail.teams,
+                isMapInProgress: game.status == .inProgress
+            )
+        } label: {
+            HStack {
+                Image(systemName: "play.circle")
+                    .frame(width: 28)
+                Text("Round replay")
+                    .font(.body.weight(.semibold))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(minHeight: 44)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Shows kills, spike plays and buys for each round of this map")
     }
 
     @ViewBuilder

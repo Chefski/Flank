@@ -777,10 +777,15 @@ struct VLRAPIClient: Sendable {
         return body.data
     }
 
-    func fetchMatchDetail(id: Int) async throws -> V3MatchDetail {
+    /// The match page. `light` skips the per-map performance and economy tabs, which
+    /// costs the API about one vlr.gg request instead of up to 11; use it when only the
+    /// teams, logos, status or start time are needed. Older servers ignore the flag and
+    /// send the full detail.
+    func fetchMatchDetail(id: Int, light: Bool = false) async throws -> V3MatchDetail {
         let url = try configuration.url(
             versionPath: configuration.v3Path,
-            path: ["matches", String(id)]
+            path: ["matches", String(id)],
+            queryItems: light ? [URLQueryItem(name: "light", value: "true")] : []
         )
         let body: V3Response<V3MatchDetail, V3EntityMeta> = try await request(url)
         guard body.data.id == id, body.meta.id == id else {
@@ -814,7 +819,9 @@ struct VLRAPIClient: Sendable {
         return body.data
     }
 
-    private func request<Value: Decodable>(_ url: URL) async throws -> Value {
+    /// GETs `url` and decodes the JSON body, mapping transport, HTTP and decoding
+    /// failures to `VLRAPIError`.
+    func request<Value: Decodable>(_ url: URL) async throws -> Value {
         var request = URLRequest(url: url)
         request.timeoutInterval = configuration.timeout
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -855,8 +862,33 @@ struct V3MatchDetailResult: Sendable {
     let isStale: Bool
 }
 
+extension V3MatchDetail {
+    /// Whether scores may be changing: the match is live, or it is scheduled but its
+    /// start time has passed, so it may have gone live since it was fetched.
+    func mayBeLive(now: Date) -> Bool {
+        switch status {
+        case .live:
+            return true
+        case .scheduled:
+            return startsAt.map { $0 <= now } ?? false
+        case .completed, .unknown:
+            return false
+        }
+    }
+}
+
+/// Shared, de-duplicated access to match details.
+///
+/// Full and light details are cached separately: a light one (no per-map performance or
+/// economy) is never returned where the full detail was asked for, while a fresh full
+/// one also answers light requests.
 actor V3MatchDetailRepository {
-    typealias Loader = @Sendable (Int) async throws -> V3MatchDetail
+    typealias Loader = @Sendable (_ id: Int, _ light: Bool) async throws -> V3MatchDetail
+
+    private struct Key: Hashable {
+        let id: Int
+        let light: Bool
+    }
 
     private struct CacheEntry {
         let detail: V3MatchDetail
@@ -871,63 +903,87 @@ actor V3MatchDetailRepository {
     static let shared = V3MatchDetailRepository()
 
     private let cacheTTL: TimeInterval
+    private let liveCacheTTL: TimeInterval
     private let loader: Loader
     private let now: @Sendable () -> Date
-    private var cache: [Int: CacheEntry] = [:]
-    private var inFlight: [Int: InFlight] = [:]
+    private var cache: [Key: CacheEntry] = [:]
+    private var inFlight: [Key: InFlight] = [:]
 
+    /// - Parameters:
+    ///   - cacheTTL: How long a detail stays fresh.
+    ///   - liveCacheTTL: How long a live match (or a scheduled one past its start time)
+    ///     stays fresh; matches the API's 30 s edge cache for live scores.
     init(
         cacheTTL: TimeInterval = 5 * 60,
+        liveCacheTTL: TimeInterval = 30,
         now: @escaping @Sendable () -> Date = { Date() },
         loader: Loader? = nil
     ) {
         let client = VLRAPIClient()
         self.cacheTTL = cacheTTL
+        self.liveCacheTTL = liveCacheTTL
         self.now = now
-        self.loader = loader ?? { id in
-            try await client.fetchMatchDetail(id: id)
+        self.loader = loader ?? { id, light in
+            try await client.fetchMatchDetail(id: id, light: light)
         }
     }
 
-    func detail(id: Int, forceRefresh: Bool = false) async throws -> V3MatchDetailResult {
-        let staleEntry = cache[id]
-        if !forceRefresh,
-           let entry = staleEntry,
-           now().timeIntervalSince(entry.storedAt) < cacheTTL {
-            return V3MatchDetailResult(detail: entry.detail, isStale: false)
+    /// - Parameter light: Accept a detail without per-map performance and economy, for
+    ///   logos, status and start times in lists.
+    func detail(id: Int, light: Bool = false, forceRefresh: Bool = false) async throws -> V3MatchDetailResult {
+        let date = now()
+        let fullKey = Key(id: id, light: false)
+        let key = Key(id: id, light: light)
+        // A light request is happy with a full detail; a full request never takes a light one.
+        let candidates = light ? [fullKey, key] : [fullKey]
+
+        let cachedEntries = candidates.compactMap { cache[$0] }
+        if !forceRefresh, let fresh = cachedEntries.first(where: { isFresh($0, at: date) }) {
+            return V3MatchDetailResult(detail: fresh.detail, isStale: false)
         }
+        let staleEntry = cachedEntries.max { $0.storedAt < $1.storedAt }
 
         let waiterID = UUID()
         let task: Task<V3MatchDetail, Error>
-        if var current = inFlight[id] {
+        let taskKey: Key
+        if light, var current = inFlight[fullKey] {
+            // A full request already on its way answers this one too.
             current.waiters.insert(waiterID)
-            inFlight[id] = current
+            inFlight[fullKey] = current
             task = current.task
+            taskKey = fullKey
+        } else if var current = inFlight[key] {
+            current.waiters.insert(waiterID)
+            inFlight[key] = current
+            task = current.task
+            taskKey = key
         } else {
-            let newTask = Task { try await loader(id) }
-            inFlight[id] = InFlight(task: newTask, waiters: [waiterID])
+            let loader = loader
+            let newTask = Task { try await loader(id, light) }
+            inFlight[key] = InFlight(task: newTask, waiters: [waiterID])
             task = newTask
+            taskKey = key
         }
 
         return try await withTaskCancellationHandler {
             do {
                 let value = try await task.value
                 try Task.checkCancellation()
-                cache[id] = CacheEntry(detail: value, storedAt: now())
-                finishWaiter(waiterID, matchID: id)
+                cache[taskKey] = CacheEntry(detail: value, storedAt: now())
+                finishWaiter(waiterID, key: taskKey)
                 return V3MatchDetailResult(detail: value, isStale: false)
             } catch is CancellationError {
-                finishWaiter(waiterID, matchID: id)
+                finishWaiter(waiterID, key: taskKey)
                 throw CancellationError()
             } catch {
-                finishWaiter(waiterID, matchID: id)
+                finishWaiter(waiterID, key: taskKey)
                 if let staleEntry {
                     return V3MatchDetailResult(detail: staleEntry.detail, isStale: true)
                 }
                 throw error
             }
         } onCancel: {
-            Task { await self.cancelWaiter(waiterID, matchID: id) }
+            Task { await self.cancelWaiter(waiterID, key: taskKey) }
         }
     }
 
@@ -935,24 +991,29 @@ actor V3MatchDetailRepository {
         cache.removeAll()
     }
 
-    private func finishWaiter(_ waiterID: UUID, matchID: Int) {
-        guard var current = inFlight[matchID] else { return }
+    private func isFresh(_ entry: CacheEntry, at date: Date) -> Bool {
+        let ttl = entry.detail.mayBeLive(now: date) ? min(liveCacheTTL, cacheTTL) : cacheTTL
+        return date.timeIntervalSince(entry.storedAt) < ttl
+    }
+
+    private func finishWaiter(_ waiterID: UUID, key: Key) {
+        guard var current = inFlight[key] else { return }
         current.waiters.remove(waiterID)
         if current.waiters.isEmpty {
-            inFlight[matchID] = nil
+            inFlight[key] = nil
         } else {
-            inFlight[matchID] = current
+            inFlight[key] = current
         }
     }
 
-    private func cancelWaiter(_ waiterID: UUID, matchID: Int) {
-        guard var current = inFlight[matchID] else { return }
+    private func cancelWaiter(_ waiterID: UUID, key: Key) {
+        guard var current = inFlight[key] else { return }
         current.waiters.remove(waiterID)
         if current.waiters.isEmpty {
             current.task.cancel()
-            inFlight[matchID] = nil
+            inFlight[key] = nil
         } else {
-            inFlight[matchID] = current
+            inFlight[key] = current
         }
     }
 }

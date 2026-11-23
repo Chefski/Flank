@@ -20,6 +20,24 @@ def _fresh_rate_limit_budget():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_upstream_guard(monkeypatch):
+    """No request pacing, no carried-over cooldown, no learned theme images.
+
+    Pacing would only slow the suite down, a cooldown tripped by one test's
+    fake 429 must not leak into the next, and a learned light→dark image map
+    would let a later test skip the dark fetch it asserts on.
+    """
+    from utils.http_client import theme_image_map, upstream_guard
+
+    upstream_guard.reset()
+    theme_image_map.clear()
+    monkeypatch.setattr(upstream_guard, "min_interval", 0.0)
+    yield
+    upstream_guard.reset()
+    theme_image_map.clear()
+
+
+@pytest.fixture(autouse=True)
 def _offline_logo_enrichment(monkeypatch):
     """Keep list-logo enrichment from reaching vlr.gg in tests.
 

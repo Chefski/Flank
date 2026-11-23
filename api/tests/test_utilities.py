@@ -367,6 +367,101 @@ async def test_scrape_multiple_pages_raises_when_any_page_exhausts_retries(monke
     ]
 
 
+def _three_pages(client, monkeypatch, max_retries=3):
+    async def fake_sleep(_delay):
+        return None
+
+    monkeypatch.setattr("utils.pagination.get_http_client", lambda: client)
+    monkeypatch.setattr("utils.pagination.asyncio.sleep", fake_sleep)
+    return scrape_multiple_pages(
+        base_url="https://example.test",
+        parse_func=lambda _html, page: [{"page": page}],
+        config=PaginationConfig(num_pages=3, max_retries=max_retries, request_delay=0.1, timeout=5),
+        page_url_func=lambda _base, page: f"https://example.test/page-{page}",
+    )
+
+
+@pytest.mark.anyio
+async def test_a_failing_page_counts_once_against_the_shared_circuit(monkeypatch):
+    """Retries belong to fetch_with_retries: one circuit failure per page, not per attempt."""
+    circuit_breaker.reset()
+    client = FakeAsyncClient(
+        {
+            "https://example.test/page-1": [FakeResponse(200)],
+            "https://example.test/page-2": [FakeResponse(503)] * 3,
+            "https://example.test/page-3": [FakeResponse(200)],
+        }
+    )
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await _three_pages(client, monkeypatch)
+
+        assert exc_info.value.status_code == 502
+        assert "Pages with exhausted retries: 2." in exc_info.value.detail
+        assert [url for url, _ in client.calls].count("https://example.test/page-2") == 3
+        # Page 3's success closed it again; before that page 2 added just one failure.
+        assert circuit_breaker._failures.get("example.test") == 0
+    finally:
+        circuit_breaker.reset()
+
+
+@pytest.mark.anyio
+async def test_two_bad_paginated_scrapes_do_not_open_the_circuit(monkeypatch):
+    circuit_breaker.reset()
+    try:
+        for _ in range(2):
+            client = FakeAsyncClient(
+                {f"https://example.test/page-{page}": [FakeResponse(503)] * 3 for page in (1, 2)}
+            )
+
+            async def fake_sleep(_delay):
+                return None
+
+            monkeypatch.setattr("utils.pagination.get_http_client", lambda client=client: client)
+            monkeypatch.setattr("utils.pagination.asyncio.sleep", fake_sleep)
+            with pytest.raises(HTTPException):
+                await scrape_multiple_pages(
+                    base_url="https://example.test",
+                    parse_func=lambda _html, page: [],
+                    config=PaginationConfig(num_pages=2, max_retries=3, request_delay=0.1, timeout=5),
+                    page_url_func=lambda _base, page: f"https://example.test/page-{page}",
+                )
+        assert circuit_breaker._failures.get("example.test") == 4
+        assert circuit_breaker.allow_request("https://example.test/page-1")
+    finally:
+        circuit_breaker.reset()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "pushback",
+    [
+        FakeResponse(429),
+        FakeResponse(403),
+        FakeResponse(503, headers={"Retry-After": "60"}),
+    ],
+)
+async def test_pushback_stops_further_pages(monkeypatch, pushback):
+    client = FakeAsyncClient(
+        {
+            "https://example.test/page-1": [FakeResponse(200)],
+            "https://example.test/page-2": [pushback],
+            "https://example.test/page-3": [FakeResponse(200)],
+        }
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _three_pages(client, monkeypatch)
+
+    assert exc_info.value.status_code == 502
+    assert "Pages with exhausted retries: 2, 3." in exc_info.value.detail
+    assert "asked us to slow down at page 2" in exc_info.value.detail
+    assert [url for url, _ in client.calls] == [
+        "https://example.test/page-1",
+        "https://example.test/page-2",
+    ]
+
+
 @pytest.mark.anyio
 async def test_vlr_events_does_not_cache_non_200_responses(monkeypatch):
     cache_manager.clear_all()
@@ -391,10 +486,10 @@ async def test_vlr_events_does_not_cache_non_200_responses(monkeypatch):
     assert first["data"]["segments"] == []
     assert second["data"]["status"] == 200
     assert client.calls == [
-        ("https://www.vlr.gg/events", None),
-        ("https://www.vlr.gg/events", None),
-        ("https://www.vlr.gg/events", None),
-        ("https://www.vlr.gg/events", None),
+        ("https://www.vlr.gg/events", httpx.USE_CLIENT_DEFAULT),
+        ("https://www.vlr.gg/events", httpx.USE_CLIENT_DEFAULT),
+        ("https://www.vlr.gg/events", httpx.USE_CLIENT_DEFAULT),
+        ("https://www.vlr.gg/events", httpx.USE_CLIENT_DEFAULT),
     ]
     assert cache_manager.get(CACHE_TTL_EVENTS, "events", True, True, 1, False) == second
     cache_manager.clear_all()
@@ -501,10 +596,8 @@ async def test_vlr_match_detail_does_not_cache_non_200_responses(monkeypatch):
     cache_manager.clear_all()
     client = FakeAsyncClient(
         {
+            # A failed light page is not followed by a dark fetch.
             "https://www.vlr.gg/123": [
-                FakeResponse(503),
-                FakeResponse(503),
-                FakeResponse(503),
                 FakeResponse(503),
                 FakeResponse(503),
                 FakeResponse(503),
@@ -523,16 +616,8 @@ async def test_vlr_match_detail_does_not_cache_non_200_responses(monkeypatch):
     assert first["data"]["error"] == "VLR.GG returned status 503 for match detail 123"
     assert first["data"]["segments"] == []
     assert second["data"]["status"] == 200
-    assert client.calls == [
-        ("https://www.vlr.gg/123", None),
-        ("https://www.vlr.gg/123", None),
-        ("https://www.vlr.gg/123", None),
-        ("https://www.vlr.gg/123", None),
-        ("https://www.vlr.gg/123", None),
-        ("https://www.vlr.gg/123", None),
-        ("https://www.vlr.gg/123", None),
-        ("https://www.vlr.gg/123", None),
-    ]
+    # FakeResponse(200) carries no CDN images, so the second call needs one request.
+    assert client.calls == [("https://www.vlr.gg/123", httpx.USE_CLIENT_DEFAULT)] * 4
     assert cache_manager.get(CACHE_TTL_MATCH_DETAIL, "match_detail", "123", False) == second
     cache_manager.clear_all()
 
@@ -559,8 +644,8 @@ async def test_fetch_with_retries_retries_retryable_status_codes(monkeypatch):
 
     assert response.status_code == 200
     assert client.calls == [
-        ("https://example.test/resource", None),
-        ("https://example.test/resource", None),
+        ("https://example.test/resource", httpx.USE_CLIENT_DEFAULT),
+        ("https://example.test/resource", httpx.USE_CLIENT_DEFAULT),
     ]
 
 
@@ -589,22 +674,24 @@ async def test_fetch_with_retries_retries_request_errors(monkeypatch):
 
     assert response.status_code == 200
     assert client.calls == [
-        ("https://example.test/resource", None),
-        ("https://example.test/resource", None),
+        ("https://example.test/resource", httpx.USE_CLIENT_DEFAULT),
+        ("https://example.test/resource", httpx.USE_CLIENT_DEFAULT),
     ]
 
 
 @pytest.mark.anyio
-async def test_fetch_with_retries_uses_retry_after_header_on_429(monkeypatch):
+async def test_fetch_with_retries_does_not_retry_429_and_pauses_the_host(monkeypatch):
+    from utils.http_client import UpstreamCooldownError, upstream_guard
+
     client = FakeAsyncClient(
         {
             "https://example.test/resource": [
-                FakeResponse(429, headers={"Retry-After": "7"}),
+                FakeResponse(429, headers={"Retry-After": "120"}),
                 FakeResponse(200),
             ],
+            "https://example.test/other": [FakeResponse(200)],
         }
     )
-
     sleep_calls: list[float] = []
 
     async def fake_sleep(delay):
@@ -612,41 +699,99 @@ async def test_fetch_with_retries_uses_retry_after_header_on_429(monkeypatch):
 
     monkeypatch.setattr("utils.http_client.asyncio.sleep", fake_sleep)
 
-    response = await fetch_with_retries(
-        "https://example.test/resource",
-        client=client,
-        max_retries=2,
-        request_delay=1.0,
-    )
+    response = await fetch_with_retries("https://example.test/resource", client=client, max_retries=3)
 
-    assert response.status_code == 200
-    assert sleep_calls == [7.0]
+    assert response.status_code == 429
+    assert sleep_calls == []
+    assert len(client.calls) == 1
+    assert 119 < upstream_guard.cooldown_remaining("https://example.test/resource") <= 120
+
+    # Every path on the host is paused, and nothing reaches the network.
+    with pytest.raises(UpstreamCooldownError):
+        await fetch_with_retries("https://example.test/other", client=client)
+    assert len(client.calls) == 1
 
 
 @pytest.mark.anyio
-async def test_fetch_with_retries_falls_back_to_exponential_backoff_on_429_without_retry_after(monkeypatch):
-    client = FakeAsyncClient(
-        {
-            "https://example.test/resource": [FakeResponse(429), FakeResponse(200)],
-        }
-    )
+async def test_403_starts_an_escalating_cooldown_that_resets_on_success(monkeypatch):
+    from utils.http_client import upstream_guard
 
-    sleep_calls: list[float] = []
+    url = "https://example.test/resource"
+    client = FakeAsyncClient({url: [FakeResponse(403), FakeResponse(403), FakeResponse(200), FakeResponse(403)]})
 
-    async def fake_sleep(delay):
-        sleep_calls.append(delay)
+    def expire_cooldown():
+        upstream_guard._cooldown_until.clear()
 
-    monkeypatch.setattr("utils.http_client.asyncio.sleep", fake_sleep)
+    first = await fetch_with_retries(url, client=client)
+    assert first.status_code == 403
+    assert upstream_guard.cooldown_remaining(url) == pytest.approx(upstream_guard.cooldown_base, abs=1)
 
-    response = await fetch_with_retries(
-        "https://example.test/resource",
-        client=client,
-        max_retries=2,
-        request_delay=2.0,
-    )
+    expire_cooldown()
+    await fetch_with_retries(url, client=client)
+    assert upstream_guard.cooldown_remaining(url) == pytest.approx(upstream_guard.cooldown_base * 2, abs=1)
 
-    assert response.status_code == 200
-    assert sleep_calls == [2.0]
+    expire_cooldown()
+    assert (await fetch_with_retries(url, client=client)).status_code == 200
+
+    await fetch_with_retries(url, client=client)
+    assert upstream_guard.cooldown_remaining(url) == pytest.approx(upstream_guard.cooldown_base, abs=1)
+
+
+@pytest.mark.anyio
+async def test_503_with_retry_after_is_pushback_not_a_retry(monkeypatch):
+    from utils.http_client import upstream_guard
+
+    url = "https://example.test/resource"
+    client = FakeAsyncClient({url: [FakeResponse(503, headers={"Retry-After": "90"}), FakeResponse(200)]})
+
+    response = await fetch_with_retries(url, client=client, max_retries=3)
+
+    assert response.status_code == 503
+    assert len(client.calls) == 1
+    assert upstream_guard.cooldown_remaining(url) > 89
+
+
+@pytest.mark.anyio
+async def test_upstream_guard_spaces_request_starts(monkeypatch):
+    from utils import http_client
+    from utils.http_client import UpstreamGuard
+
+    guard = UpstreamGuard(max_concurrency=4, min_interval=0.5)
+    clock = [1000.0]
+    paced: list[float] = []
+
+    async def fake_pace(delay):
+        paced.append(round(delay, 1))
+        clock[0] += delay
+
+    monkeypatch.setattr(http_client, "_pace_sleep", fake_pace)
+    monkeypatch.setattr(http_client.time, "monotonic", lambda: clock[0])
+
+    for _ in range(3):
+        async with guard.slot():
+            pass
+
+    assert paced == [0.5, 0.5]
+
+
+@pytest.mark.anyio
+async def test_upstream_guard_caps_requests_in_flight():
+    from utils.http_client import UpstreamGuard
+
+    guard = UpstreamGuard(max_concurrency=2, min_interval=0.0)
+    in_flight = 0
+    peak = 0
+
+    async def request():
+        nonlocal in_flight, peak
+        async with guard.slot():
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+
+    await asyncio.gather(*(request() for _ in range(6)))
+    assert peak == 2
 
 
 # --- CircuitBreaker ---
@@ -739,19 +884,15 @@ async def test_fetch_with_retries_records_failure_after_exhausting_retries(monke
 
 @pytest.mark.anyio
 async def test_fetch_with_retries_does_not_count_429_as_circuit_failure(monkeypatch):
+    from utils.http_client import upstream_guard
+
     circuit_breaker.reset()
-    circuit_breaker.fail_max = 2
+    circuit_breaker.fail_max = 1
 
-    responses = [FakeResponse(429)] * 4 + [FakeResponse(200)]
-    client = FakeAsyncClient({"https://example.test/resource": responses})
+    client = FakeAsyncClient({"https://example.test/resource": [FakeResponse(429), FakeResponse(429)]})
 
-    async def fake_sleep(_delay):
-        pass
-
-    monkeypatch.setattr("utils.http_client.asyncio.sleep", fake_sleep)
-
-    # Two calls each exhausting retries on 429 should NOT trip the circuit
     await fetch_with_retries("https://example.test/resource", client=client, max_retries=2)
+    upstream_guard._cooldown_until.clear()
     await fetch_with_retries("https://example.test/resource", client=client, max_retries=2)
     assert circuit_breaker.allow_request("https://example.test/resource") is True
 

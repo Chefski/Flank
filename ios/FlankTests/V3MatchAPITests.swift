@@ -134,7 +134,7 @@ final class V3MatchAPITests: XCTestCase {
     func testRepositoryDeduplicatesAndReusesCachedDetail() async throws {
         let counter = CallCounter()
         let detail = try decodeDetail(completedPayload).data
-        let repository = V3MatchDetailRepository(loader: { id in
+        let repository = V3MatchDetailRepository(loader: { id, _ in
             XCTAssertEqual(id, detail.id)
             await counter.increment()
             try await Task.sleep(for: .milliseconds(80))
@@ -159,7 +159,7 @@ final class V3MatchAPITests: XCTestCase {
     func testRepositoryCancelsUnderlyingRequestWhenLastWaiterCancels() async throws {
         let cancellation = XCTestExpectation(description: "Loader cancelled")
         let detail = try decodeDetail(scheduledPayload).data
-        let repository = V3MatchDetailRepository(loader: { _ in
+        let repository = V3MatchDetailRepository(loader: { _, _ in
             do {
                 try await Task.sleep(for: .seconds(30))
                 return detail
@@ -189,7 +189,7 @@ final class V3MatchAPITests: XCTestCase {
         let repository = V3MatchDetailRepository(
             cacheTTL: 300,
             now: { clock.now },
-            loader: { _ in
+            loader: { _, _ in
                 let call = await counter.increment()
                 if call == 1 { return detail }
                 throw VLRAPIError.transport(.notConnectedToInternet)
@@ -205,6 +205,167 @@ final class V3MatchAPITests: XCTestCase {
         XCTAssertEqual(stale.detail.id, detail.id)
         let calls = await counter.value
         XCTAssertEqual(calls, 2)
+    }
+
+    func testLightDetailIsCachedApartFromFullDetail() async throws {
+        let loads = LoadLog()
+        let detail = try decodeDetail(completedPayload).data
+        let repository = V3MatchDetailRepository(loader: { _, light in
+            loads.append(light)
+            return detail
+        })
+
+        // A light result never answers a request for the full detail…
+        _ = try await repository.detail(id: detail.id, light: true)
+        _ = try await repository.detail(id: detail.id, light: true)
+        XCTAssertEqual(loads.values, [true])
+        _ = try await repository.detail(id: detail.id)
+        XCTAssertEqual(loads.values, [true, false])
+
+        // …while a cached full detail answers a light request.
+        let other = V3MatchDetailRepository(loader: { _, light in
+            loads.append(light)
+            return detail
+        })
+        _ = try await other.detail(id: detail.id)
+        _ = try await other.detail(id: detail.id, light: true)
+        XCTAssertEqual(loads.values, [true, false, false])
+    }
+
+    func testFetchMatchDetailSendsLightFlag() async throws {
+        let detailJSON = scheduledPayload
+        StubURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/v3/matches/712826")
+            XCTAssertEqual(request.url?.query, "light=true")
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            ))
+            return (response, Data(detailJSON.utf8))
+        }
+        defer { StubURLProtocol.handler = nil }
+
+        let client = VLRAPIClient(configuration: .init(host: "https://example.test"), session: stubSession())
+        let detail = try await client.fetchMatchDetail(id: 712826, light: true)
+        XCTAssertEqual(detail.id, 712826)
+    }
+
+    func testLiveDetailExpiresAfterThirtySeconds() async throws {
+        let clock = LockedClock(Date(timeIntervalSince1970: 1_785_400_000))
+        let counter = CallCounter()
+        let live = try decodeDetail(livePayload).data
+        let repository = V3MatchDetailRepository(now: { clock.now }, loader: { _, _ in
+            await counter.increment()
+            return live
+        })
+
+        _ = try await repository.detail(id: live.id)
+        clock.advance(by: 20)
+        _ = try await repository.detail(id: live.id)
+        var calls = await counter.value
+        XCTAssertEqual(calls, 1)
+
+        clock.advance(by: 11)
+        _ = try await repository.detail(id: live.id)
+        calls = await counter.value
+        XCTAssertEqual(calls, 2)
+    }
+
+    func testScheduledDetailPastItsStartUsesTheLiveTTL() throws {
+        let scheduled = try decodeDetail(
+            scheduledPayload.replacingOccurrences(
+                of: "\"starts_at\": null",
+                with: "\"starts_at\": \"2026-07-30T11:00:00Z\""
+            )
+        ).data
+        let startsAt = try XCTUnwrap(scheduled.startsAt)
+
+        XCTAssertFalse(scheduled.mayBeLive(now: startsAt.addingTimeInterval(-60)))
+        XCTAssertTrue(scheduled.mayBeLive(now: startsAt.addingTimeInterval(60)))
+        XCTAssertFalse(try decodeDetail(completedPayload).data.mayBeLive(now: startsAt))
+        XCTAssertTrue(try decodeDetail(livePayload).data.mayBeLive(now: startsAt))
+    }
+
+    func testMatchDetailAutoRefreshPolicy() throws {
+        let now = Date(timeIntervalSince1970: 1_785_409_200)
+        let live = try decodeDetail(livePayload).data
+
+        // Counted from when the last fetch finished; overdue refreshes run at once.
+        XCTAssertEqual(
+            MatchDetailAutoRefresh.delay(for: live, lastFetchFinishedAt: now.addingTimeInterval(-10), isFailing: false, now: now),
+            20
+        )
+        XCTAssertEqual(
+            MatchDetailAutoRefresh.delay(for: live, lastFetchFinishedAt: now.addingTimeInterval(-300), isFailing: false, now: now),
+            0
+        )
+        // Failing refreshes back off.
+        XCTAssertEqual(
+            MatchDetailAutoRefresh.delay(for: live, lastFetchFinishedAt: now.addingTimeInterval(-10), isFailing: true, now: now),
+            110
+        )
+
+        // A scheduled match waits for its start, then polls like a live one.
+        let scheduled = try decodeDetail(
+            scheduledPayload.replacingOccurrences(
+                of: "\"starts_at\": null",
+                with: "\"starts_at\": \"2026-07-30T11:00:00Z\""
+            )
+        ).data
+        let startsAt = try XCTUnwrap(scheduled.startsAt)
+        XCTAssertEqual(
+            MatchDetailAutoRefresh.delay(for: scheduled, lastFetchFinishedAt: nil, isFailing: false, now: startsAt.addingTimeInterval(-600)),
+            600
+        )
+        XCTAssertEqual(
+            MatchDetailAutoRefresh.delay(for: scheduled, lastFetchFinishedAt: startsAt, isFailing: false, now: startsAt.addingTimeInterval(5)),
+            25
+        )
+
+        XCTAssertNil(MatchDetailAutoRefresh.delay(
+            for: try decodeDetail(completedPayload).data,
+            lastFetchFinishedAt: nil,
+            isFailing: false,
+            now: now
+        ))
+        XCTAssertNil(MatchDetailAutoRefresh.delay(
+            for: try decodeDetail(scheduledPayload).data,
+            lastFetchFinishedAt: nil,
+            isFailing: false,
+            now: now
+        ), "A scheduled match without a start time has nothing to wait for")
+    }
+
+    func testLiveScorePollingBacksOffWhileFailing() {
+        XCTAssertEqual(LiveScorePolling.interval(hasLiveMatches: true, state: .loaded), 30)
+        XCTAssertEqual(LiveScorePolling.interval(hasLiveMatches: false, state: .empty), 120)
+        XCTAssertEqual(
+            LiveScorePolling.interval(hasLiveMatches: true, state: .showingSaved(message: "x", isOffline: true)),
+            120
+        )
+        XCTAssertEqual(
+            LiveScorePolling.interval(hasLiveMatches: false, state: .failed(message: "x", retryable: true)),
+            120
+        )
+    }
+
+    func testTeamLogoDirectoryMatchesByIDThenName() throws {
+        let teams = try VLRAPI.decoder.decode([V3TeamRef].self, from: Data("""
+        [{"id": 2, "name": "Sentinels", "image": {"url": "https://owcdn.net/img/sen.png"}},
+         {"name": "Paper Rex", "image": {"url": "https://owcdn.net/img/prx.png"}},
+         {"id": 9, "name": "No Logo"}]
+        """.utf8))
+        let directory = TeamLogoDirectory(teams: teams)
+        let rows = try VLRAPI.decoder.decode([V3TeamRef].self, from: Data("""
+        [{"id": 2, "name": "SEN (renamed)"}, {"name": "  paper rex "}, {"id": 9, "name": "No Logo"}, {"name": "Unknown"}]
+        """.utf8))
+
+        XCTAssertEqual(directory.image(for: rows[0])?.url, "https://owcdn.net/img/sen.png")
+        XCTAssertEqual(directory.image(for: rows[1])?.url, "https://owcdn.net/img/prx.png")
+        XCTAssertNil(directory.image(for: rows[2]), "Teams without a logo aren't recorded")
+        XCTAssertNil(directory.image(for: rows[3]))
     }
 
     func testUnknownEnumValuesDecodeAsUnknown() throws {
@@ -626,6 +787,17 @@ private final class LockedClock: @unchecked Sendable {
         lock.lock()
         value = value.addingTimeInterval(interval)
         lock.unlock()
+    }
+}
+
+private final class LoadLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var log: [Bool] = []
+
+    var values: [Bool] { lock.withLock { log } }
+
+    func append(_ value: Bool) {
+        lock.withLock { log.append(value) }
     }
 }
 
