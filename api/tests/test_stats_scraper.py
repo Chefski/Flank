@@ -1,0 +1,885 @@
+import logging
+import re
+from urllib.parse import parse_qs, urlparse
+
+import pytest
+from fastapi import HTTPException
+from selectolax.lexbor import LexborHTMLParser as HTMLParser
+
+import api.scrapers.stats as stats_mod
+from api.scrapers.stats import (
+    _build_column_map,
+    _filter_mismatches,
+    _parse_stats_row,
+    _selected_region,
+    normalize_stats_filters,
+    vlr_stats,
+)
+from utils.cache_manager import cache_manager
+from utils.constants import STATS_TIERS
+from utils.error_handling import validate_region
+
+# ---------------------------------------------------------------------------
+# Legacy (pre-revamp) 21-ish column markup: NO data-col attributes, org lives in
+# .stats-player-country. Cells are laid out at the historical positional indices
+# (player td[0], agents td[1], then rnd td[2], rating td[3], acs td[4] ...).
+# ---------------------------------------------------------------------------
+STATS_HTML = """
+<html>
+  <table>
+    <tbody>
+      <tr>
+        <td class="mod-player mod-a">
+          <a>
+            <div class="text-of">TenZ Prime</div>
+            <div class="stats-player-country">Team Liquid</div>
+          </a>
+        </td>
+        <td class="mod-agents">
+          <img src="/img/vlr/game/agents/jett.png">
+          <img src="/img/vlr/game/agents/omen.png">
+        </td>
+        <td class="mod-rnd">442</td>
+        <td class="mod-color-sq">1.36</td>
+        <td class="mod-color-sq mod-acs">248.4</td>
+        <td class="mod-color-sq">1.58</td>
+        <td class="mod-color-sq">79%</td>
+        <td class="mod-color-sq">158.5</td>
+        <td class="mod-color-sq">0.90</td>
+        <td class="mod-color-sq">0.36</td>
+        <td class="mod-color-sq">0.07</td>
+        <td class="mod-color-sq">0.05</td>
+        <td class="mod-color-sq">33%</td>
+        <td class="mod-color-sq">16%</td>
+        <td class="mod-cl">9/57</td>
+      </tr>
+    </tbody>
+  </table>
+</html>
+"""
+
+# The full ordered list of data-col attributes vlr.gg now emits (after the player
+# column, which is unlabelled). 22 keyed columns == 23 <th> including player.
+# October 2026 revamp: ``rating2`` became ``rating`` and ``fbpr`` became ``fkpr``.
+NEW_DATA_COLS = [
+    "agents", "maps", "rnd", "rating", "acs", "kd", "kast", "adr", "kpr", "apr",
+    "fkfd", "fkpr", "fdpr", "hsp", "clp", "cl", "kmax", "k", "d", "a", "fk", "fd",
+]
+
+# Realistic per-column cell text for one row.
+NEW_ROW_VALUES = {
+    "maps": "11", "rnd": "228", "rating": "1.37", "acs": "247", "kd": "1.15",
+    "kast": "73%", "adr": "155.0", "kpr": "0.82", "apr": "0.30", "fkfd": "+5",
+    "fkpr": "14%", "fdpr": "10%", "hsp": "28%", "clp": "20%", "cl": "7/35",
+    "kmax": "30", "k": "180", "d": "150", "a": "60", "fk": "25", "fd": "20",
+}
+
+STATS_REGION_OPTIONS = ["all", "americas", "emea", "pacific", "china", "intl"]
+
+
+def _thead(data_cols=NEW_DATA_COLS, drop=()):
+    """Build a <thead> with a data-col on each column except those in ``drop``."""
+    ths = ['<th class="mod-player">Player</th>']
+    for col in data_cols:
+        if col in drop:
+            ths.append(f"<th>{col}</th>")  # present but unkeyed
+        else:
+            ths.append(f'<th data-col="{col}">{col}</th>')
+    return "<thead><tr>" + "".join(ths) + "</tr></thead>"
+
+
+def _new_row(values=None, org="NRG", player="brawk", org_class="st-pl-country"):
+    """Build a <tr> whose <td> order matches NEW_DATA_COLS (player first)."""
+    values = values if values is not None else NEW_ROW_VALUES
+    tds = [
+        f'<td class="mod-player"><a href="/player/1234/{player}">'
+        f'<i class="flag mod-us"></i><div class="text-of">{player}</div>'
+        f'<div class="{org_class}">{org}</div></a></td>'
+    ]
+    for col in NEW_DATA_COLS:
+        if col == "agents":
+            tds.append(
+                '<td class="mod-agents"><span class="st-agent">'
+                '<img src="/img/vlr/game/agents/jett.png">'
+                '<span class="st-agent-n">100%</span></span></td>'
+            )
+        elif col == "kmax":
+            tds.append(
+                '<td><a href="/5555/example-match/?game=7777">'
+                f"{values.get(col, '')}</a></td>"
+            )
+        else:
+            tds.append(f"<td>{values.get(col, '')}</td>")
+    return "<tr>" + "".join(tds) + "</tr>"
+
+
+def _region_form(selected="americas"):
+    """Modern (October 2026) filter form: region[] checkboxes, checked = applied."""
+    boxes = []
+    for r in STATS_REGION_OPTIONS:
+        if r == "all":
+            continue  # "all" is the absence of a ticked region, not a checkbox
+        checked = " checked" if r == selected else ""
+        boxes.append(
+            f'<input type="checkbox" name="region[]" value="{r}"{checked}>'
+        )
+    return '<form class="st-filter" action="/stats" method="get">' + "".join(boxes) + "</form>"
+
+
+def _region_select(selected="americas"):
+    """Legacy filter markup: a single <select> with one <option selected>."""
+    opts = []
+    for r in STATS_REGION_OPTIONS:
+        sel = " selected" if r == selected else ""
+        opts.append(f'<option value="{r}"{sel}>{r}</option>')
+    return '<select name="region">' + "".join(opts) + "</select>"
+
+
+def make_stats_page(selected="americas", rows=None, thead=None, region_markup="modern"):
+    """Assemble a full new-markup /stats page for the vlr_stats flow tests.
+
+    ``region_markup`` selects how the applied filter is echoed: ``"modern"`` (the
+    current region[] checkbox form), ``"legacy"`` (the retired <select>), or
+    ``"none"`` (markup we do not model, so response validation is skipped).
+    """
+    if thead is None:
+        thead = _thead()
+    if rows is None:
+        rows = _new_row()
+    if region_markup == "modern":
+        region_html = _region_form(selected)
+    elif region_markup == "legacy":
+        region_html = _region_select(selected)
+    else:
+        region_html = ""
+    return (
+        f"<html><body>{region_html}"
+        f"<table>{thead}<tbody>{rows}</tbody></table></body></html>"
+    )
+
+
+class FakeResponse:
+    def __init__(self, status_code: int, text: str):
+        self.status_code = status_code
+        self.text = text
+        self.content = text.encode("utf-8")
+        self.headers: dict = {}
+
+
+def _region_of(url: str) -> str | None:
+    """Extract the region query value from a /stats URL. None => a prime GET.
+
+    Accepts both the current ``region[]`` checkbox form and the legacy
+    singular ``region`` name.
+    """
+    query = parse_qs(urlparse(url).query)
+    for key in ("region[]", "region"):
+        if key in query:
+            return query[key][0]
+    return None
+
+
+class FakeFetch:
+    """Stand-in for fetch_with_retries: routes prime vs data requests by URL.
+
+    A URL with no ``region=`` is the priming GET. Data URLs get a page whose
+    selected region echoes the requested one, unless ``selected_override`` forces a
+    different (mismatched) region to simulate D4 poisoning.
+    """
+
+    def __init__(self):
+        self.calls: list[str] = []
+        self.prime_status = 200
+        self.selected_override: str | None = None
+        self.page_for_region = None  # optional callable(region) -> html
+
+    async def __call__(self, url, *, client=None, **kwargs):
+        self.calls.append(url)
+        region = _region_of(url)
+        if region is None:
+            return FakeResponse(self.prime_status, "<html><body>primed</body></html>")
+        if self.page_for_region is not None:
+            return FakeResponse(200, self.page_for_region(region))
+        selected = self.selected_override or region
+        return FakeResponse(200, make_stats_page(selected=selected))
+
+
+@pytest.fixture(autouse=True)
+def _reset_stats_state():
+    """Each test starts cold: empty cache and an unprimed session."""
+    cache_manager.clear_all()
+    stats_mod._primed = False
+    yield
+    cache_manager.clear_all()
+    stats_mod._primed = False
+
+
+def _install_fake_fetch(monkeypatch) -> FakeFetch:
+    fetch = FakeFetch()
+    monkeypatch.setattr("api.scrapers.stats.fetch_with_retries", fetch)
+    monkeypatch.setattr("api.scrapers.stats.get_http_client", lambda: object())
+    return fetch
+
+
+def _cached_stats(region="americas", timespan="60", **kwargs):
+    filters = normalize_stats_filters(region, timespan, **kwargs)
+    return cache_manager.get(
+        stats_mod.CACHE_TTL_STATS,
+        "stats",
+        filters.upstream_query(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Row / column-map parsing
+# ---------------------------------------------------------------------------
+
+def test_parse_stats_row_legacy_positional_fallback():
+    """Old 21-column markup (no data-col, .stats-player-country) still parses."""
+    row = HTMLParser(STATS_HTML).css_first("tbody tr")
+
+    assert _parse_stats_row(row) == {
+        "player": "TenZ Prime",
+        "player_id": "",
+        "player_url": "",
+        "country": "",
+        "org": "Team Liquid",
+        "agents": ["jett", "omen"],
+        "agent_usage": [
+            {"agent": "jett", "usage": ""},
+            {"agent": "omen", "usage": ""},
+        ],
+        "rounds_played": "442",
+        "rating": "1.36",
+        "average_combat_score": "248.4",
+        "kill_deaths": "1.58",
+        "kill_assists_survived_traded": "79%",
+        "average_damage_per_round": "158.5",
+        "kills_per_round": "0.90",
+        "assists_per_round": "0.36",
+        "first_kills_per_round": "0.07",
+        "first_deaths_per_round": "0.05",
+        "headshot_percentage": "33%",
+        "clutch_success_percentage": "16%",
+        "clutch_attempts": "9/57",
+        "max_kills_match_id": "",
+        "max_kills_game_id": "",
+        "max_kills_match_url": "",
+    }
+
+
+def test_parse_stats_row_new_markup_header_keyed():
+    """23-column markup: cells read by data-col key, immune to inserted columns."""
+    tree = HTMLParser(make_stats_page(region_markup="none"))
+    col_map = _build_column_map(tree)
+    row = tree.css_first("tbody tr")
+
+    parsed = _parse_stats_row(row, col_map)
+
+    assert parsed["rounds_played"] == "228"
+    assert parsed["rating"] == "1.37"
+    assert parsed["average_combat_score"] == "247"
+    assert parsed["org"] == "NRG"
+    assert parsed["player_id"] == "1234"
+    assert parsed["player_url"] == "https://www.vlr.gg/player/1234/brawk"
+    assert parsed["country"] == "us"
+    assert parsed["agent_usage"] == [{"agent": "jett", "usage": "100%"}]
+    assert parsed["maps_played"] == "11"
+    assert parsed["first_kill_death_ratio"] == "+5"
+    assert parsed["first_kills_per_round"] == "14%"
+    assert parsed["max_kills"] == "30"
+    assert parsed["max_kills_match_id"] == "5555"
+    assert parsed["max_kills_game_id"] == "7777"
+    assert parsed["max_kills_match_url"] == "https://www.vlr.gg/5555/example-match/?game=7777"
+    assert parsed["kills"] == "180"
+    assert parsed["deaths"] == "150"
+    assert parsed["assists"] == "60"
+    assert parsed["first_kills"] == "25"
+    assert parsed["first_deaths"] == "20"
+    # clutch_attempts must come from the ``cl`` key, not a positional index.
+    assert parsed["clutch_attempts"] == "7/35"
+    # the inserted ``maps`` column must NOT leak into rounds_played.
+    assert parsed["rounds_played"] != "11"
+
+
+def test_build_column_map_keys_align_with_td_positions():
+    tree = HTMLParser(make_stats_page(region_markup="none"))
+    col_map = _build_column_map(tree)
+
+    # player is td[0] (unkeyed), agents td[1], maps td[2], rnd td[3] ...
+    assert col_map["agents"] == 1
+    assert col_map["maps"] == 2
+    assert col_map["rnd"] == 3
+    assert col_map["rating"] == 4
+    assert col_map["acs"] == 5
+    assert col_map["cl"] == 16
+
+
+def test_build_column_map_none_for_legacy_markup():
+    tree = HTMLParser(STATS_HTML)
+    assert _build_column_map(tree) is None
+
+
+# ---------------------------------------------------------------------------
+# Org selector fallback (D2)
+# ---------------------------------------------------------------------------
+
+def test_org_selector_prefers_new_class():
+    html = (
+        '<table><tbody><tr><td class="mod-player"><a>'
+        '<div class="text-of">p</div>'
+        '<div class="st-pl-country">NRG</div>'
+        '<div class="stats-player-country">OLD</div>'
+        '</a></td></tr></tbody></table>'
+    )
+    row = HTMLParser(html).css_first("tbody tr")
+    assert _parse_stats_row(row)["org"] == "NRG"
+
+
+def test_org_selector_falls_back_to_old_class():
+    html = (
+        '<table><tbody><tr><td class="mod-player"><a>'
+        '<div class="text-of">p</div>'
+        '<div class="stats-player-country">VIT</div>'
+        '</a></td></tr></tbody></table>'
+    )
+    row = HTMLParser(html).css_first("tbody tr")
+    assert _parse_stats_row(row)["org"] == "VIT"
+
+
+def test_org_selector_missing_defaults_na():
+    html = (
+        '<table><tbody><tr><td class="mod-player"><a>'
+        '<div class="text-of">p</div></a></td></tr></tbody></table>'
+    )
+    row = HTMLParser(html).css_first("tbody tr")
+    assert _parse_stats_row(row)["org"] == "N/A"
+
+
+# ---------------------------------------------------------------------------
+# Full vlr_stats flow
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_vlr_stats_custom_map_and_floors_reach_the_request(monkeypatch):
+    fetch = _install_fake_fetch(monkeypatch)
+
+    await vlr_stats("americas", "all", None, "ascent", 0, 1.3)
+
+    query = parse_qs(urlparse(fetch.calls[-1]).query)
+    assert query["map_id"] == ["5"]
+    assert query["min_rounds"] == ["0"]
+    assert query["min_rating"] == ["1300"]
+
+
+@pytest.mark.anyio
+async def test_vlr_stats_defaults_keep_the_previous_contract(monkeypatch):
+    fetch = _install_fake_fetch(monkeypatch)
+
+    await vlr_stats("americas", "60")
+
+    query = parse_qs(urlparse(fetch.calls[-1]).query)
+    assert query["map_id"] == ["all"]
+    assert query["min_rounds"] == ["200"]
+    assert query["min_rating"] == ["1550"]
+
+
+@pytest.mark.anyio
+async def test_vlr_stats_requests_every_tier_so_the_ladder_is_not_vct_only(monkeypatch):
+    """Omitting tier[] lets vlr.gg fall back to its data-defaults value of vct."""
+    fetch = _install_fake_fetch(monkeypatch)
+
+    await vlr_stats("emea", "60")
+
+    query = parse_qs(urlparse(fetch.calls[-1]).query)
+    assert query["tier[]"] == list(STATS_TIERS)
+
+
+@pytest.mark.anyio
+async def test_vlr_stats_repeats_only_the_array_valued_filters(monkeypatch):
+    """The pair-list encoding must not expand a single-valued filter."""
+    fetch = _install_fake_fetch(monkeypatch)
+
+    await vlr_stats("americas", "all", None, "ascent", 0, 1.3)
+
+    query = parse_qs(urlparse(fetch.calls[-1]).query)
+    assert query["region[]"] == ["americas"]
+    assert query["map_id"] == ["5"]
+    assert query["min_rating"] == ["1300"]
+    assert len(query["tier[]"]) == len(STATS_TIERS)
+
+
+@pytest.mark.anyio
+async def test_vlr_stats_new_markup_end_to_end(monkeypatch):
+    fetch = _install_fake_fetch(monkeypatch)
+
+    data = await vlr_stats("americas", "60")
+
+    seg = data["data"]["segments"]
+    assert len(seg) == 1
+    assert seg[0]["rounds_played"] == "228"
+    assert seg[0]["rating"] == "1.37"
+    assert seg[0]["average_combat_score"] == "247"
+    assert seg[0]["org"] == "NRG"
+    assert seg[0]["clutch_attempts"] == "7/35"
+    assert seg[0]["player_id"] == "1234"
+    assert seg[0]["maps_played"] == "11"
+    assert seg[0]["max_kills_match_id"] == "5555"
+    assert seg[0]["kills"] == "180"
+    assert data["data"]["filters"]["span"] == "60d"
+    assert data["data"]["filters"]["min_rounds"] == 200
+    assert data["data"]["filters"]["min_rating"] == 1550
+    # prime fired first, exactly once, before the data fetch
+    assert _region_of(fetch.calls[0]) is None
+    assert _region_of(fetch.calls[1]) == "americas"
+
+
+@pytest.mark.anyio
+async def test_vlr_stats_legacy_markup_logs_warning(monkeypatch, caplog):
+    fetch = _install_fake_fetch(monkeypatch)
+    # legacy page: positional cells, no data-col, no region select (skip validation)
+    legacy_thead = "<thead><tr><th>Player</th><th>Agents</th><th>Rnd</th></tr></thead>"
+    legacy_tbody = HTMLParser(STATS_HTML).css_first("tbody").html
+    legacy_page = f"<html><body><table>{legacy_thead}{legacy_tbody}</table></body></html>"
+    fetch.page_for_region = lambda region: legacy_page
+
+    with caplog.at_level(logging.WARNING, logger="api.scrapers.stats"):
+        data = await vlr_stats("americas", "60")
+
+    seg = data["data"]["segments"]
+    assert seg[0]["rounds_played"] == "442"
+    assert seg[0]["rating"] == "1.36"
+    assert seg[0]["org"] == "Team Liquid"
+    assert any("no data-col" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.anyio
+async def test_vlr_stats_missing_required_key_raises(monkeypatch):
+    fetch = _install_fake_fetch(monkeypatch)
+    # data-col present on most columns, but rating is unkeyed -> must fail closed
+    page = make_stats_page(thead=_thead(drop=("rating",)))
+    fetch.page_for_region = lambda region: page
+
+    with pytest.raises(HTTPException) as exc:
+        await vlr_stats("americas", "60")
+    assert exc.value.status_code == 502
+    # nothing partial-parsed reached the cache
+    assert _cached_stats() is None
+
+
+@pytest.mark.anyio
+async def test_priming_fires_once_across_two_region_calls(monkeypatch):
+    fetch = _install_fake_fetch(monkeypatch)
+
+    await vlr_stats("americas", "60")
+    await vlr_stats("emea", "60")
+
+    prime_calls = [c for c in fetch.calls if _region_of(c) is None]
+    assert len(prime_calls) == 1
+    # order: prime, then the two data fetches
+    assert _region_of(fetch.calls[0]) is None
+    assert _region_of(fetch.calls[1]) == "americas"
+    assert _region_of(fetch.calls[2]) == "emea"
+
+
+@pytest.mark.anyio
+async def test_failing_prime_raises_and_caches_nothing(monkeypatch):
+    fetch = _install_fake_fetch(monkeypatch)
+    fetch.prime_status = 503
+
+    with pytest.raises(HTTPException) as exc:
+        await vlr_stats("americas", "60")
+    assert exc.value.status_code == 503
+    # only the prime was attempted; no data fetch, nothing cached
+    assert all(_region_of(c) is None for c in fetch.calls)
+    assert _cached_stats() is None
+    assert stats_mod._primed is False
+
+
+@pytest.mark.anyio
+async def test_region_mismatch_retries_then_raises(monkeypatch):
+    fetch = _install_fake_fetch(monkeypatch)
+    fetch.selected_override = "all"  # page always claims the global list
+
+    with pytest.raises(HTTPException) as exc:
+        await vlr_stats("americas", "60")
+    assert exc.value.status_code == 502
+
+    # one prime, one data fetch, one FORCED re-prime, one refetch
+    prime_calls = [c for c in fetch.calls if _region_of(c) is None]
+    data_calls = [c for c in fetch.calls if _region_of(c) is not None]
+    assert len(prime_calls) == 2
+    assert len(data_calls) == 2
+    # the mismatched response was never cached
+    assert _cached_stats() is None
+
+
+@pytest.mark.anyio
+async def test_region_mismatch_recovers_on_reprime(monkeypatch):
+    """A mismatch on the first fetch that clears after a re-prime succeeds."""
+    fetch = _install_fake_fetch(monkeypatch)
+    state = {"first": True}
+
+    def builder(region):
+        if state["first"]:
+            state["first"] = False
+            return make_stats_page(selected="all")  # cold/global on first data fetch
+        return make_stats_page(selected=region)
+
+    fetch.page_for_region = builder
+
+    data = await vlr_stats("americas", "60")
+    assert data["data"]["segments"][0]["org"] == "NRG"
+
+
+@pytest.mark.anyio
+async def test_alias_normalizes_before_cache_key(monkeypatch):
+    fetch = _install_fake_fetch(monkeypatch)
+
+    await vlr_stats("na", "60")
+
+    # cache entry is keyed on the canonical region, not the alias
+    assert _cached_stats("americas") is not None
+    # The alias normalizes to the same cache key.
+    assert _cached_stats("na") is not None
+    # the fetched URL carries the canonical region
+    data_calls = [c for c in fetch.calls if _region_of(c) is not None]
+    assert _region_of(data_calls[0]) == "americas"
+
+    # a follow-up canonical request is served from the same cache entry (no refetch)
+    before = len(fetch.calls)
+    await vlr_stats("americas", "60")
+    assert len(fetch.calls) == before
+
+
+@pytest.mark.anyio
+async def test_empty_region_returns_no_error_no_retry(monkeypatch):
+    fetch = _install_fake_fetch(monkeypatch)
+    # correct selected region, zero rows
+    fetch.page_for_region = lambda region: make_stats_page(selected=region, rows="")
+
+    data = await vlr_stats("pacific", "60")
+
+    assert data["data"]["segments"] == []
+    assert data["data"]["status"] == 200
+    # exactly one prime + one data fetch, no retry
+    assert len(fetch.calls) == 2
+
+
+@pytest.mark.anyio
+async def test_tableless_empty_page_returns_empty_without_fallback_warning(monkeypatch, caplog):
+    """vlr.gg renders NO table at all for a zero-row result (e.g. sparse tier/span
+    windows). That is an empty result set, not legacy markup — no fallback warning."""
+    fetch = _install_fake_fetch(monkeypatch)
+    fetch.page_for_region = lambda region: (
+        f"<html><body>{_region_form(selected=region)}</body></html>"
+    )
+
+    with caplog.at_level(logging.WARNING, logger="api.scrapers.stats"):
+        data = await vlr_stats("americas", "60")
+
+    assert data["data"]["segments"] == []
+    assert not any("no data-col" in rec.message for rec in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Region vocabulary
+# ---------------------------------------------------------------------------
+
+def test_selected_region_reads_checked_region_checkbox():
+    """Current markup: the applied region is the checked region[] box."""
+    tree = HTMLParser(make_stats_page(selected="emea"))
+    assert _selected_region(tree) == "emea"
+
+
+def test_selected_region_is_all_when_form_ticks_nothing():
+    """A st-filter form with no region ticked means no region restriction."""
+    tree = HTMLParser(make_stats_page(selected="all"))
+    assert _selected_region(tree) == "all"
+
+
+def test_selected_region_falls_back_to_legacy_select():
+    """The retired <select> is still read, so an older page keeps validating."""
+    tree = HTMLParser(make_stats_page(selected="emea", region_markup="legacy"))
+    assert _selected_region(tree) == "emea"
+
+
+def test_selected_region_prefers_the_modern_form():
+    """Both shapes on one page: the live form wins over the legacy select."""
+    html = (
+        f"{_region_form(selected='emea')}{_region_select(selected='china')}"
+        "<table></table>"
+    )
+    assert _selected_region(HTMLParser(html)) == "emea"
+
+
+def test_selected_region_none_when_absent():
+    tree = HTMLParser("<html><body><table></table></body></html>")
+    assert _selected_region(tree) is None
+
+
+@pytest.mark.anyio
+async def test_request_uses_the_region_array_param(monkeypatch):
+    """The revamped form submits region[]; that is the shape we send."""
+    fetch = _install_fake_fetch(monkeypatch)
+
+    await vlr_stats("pacific", "60")
+
+    data_calls = [c for c in fetch.calls if _region_of(c) is not None]
+    assert data_calls
+    assert "region%5B%5D=pacific" in data_calls[0]
+    assert re.search(r"[?&]region=pacific", data_calls[0]) is None
+
+
+@pytest.mark.parametrize("value", ["americas", "all", "intl"])
+def test_validate_stats_region_accepts_canonical(value):
+    from utils.error_handling import validate_stats_region
+    assert validate_stats_region(value) == value
+
+
+@pytest.mark.parametrize(
+    "alias,canonical",
+    [("na", "americas"), ("br", "americas"), ("eu", "emea"),
+     ("ap", "pacific"), ("kr", "pacific"), ("jp", "pacific"),
+     ("oce", "pacific"), ("cn", "china")],
+)
+def test_validate_stats_region_normalizes_aliases(alias, canonical):
+    from utils.error_handling import validate_stats_region
+    assert validate_stats_region(alias) == canonical
+
+
+@pytest.mark.parametrize("value", ["la", "la-s", "la-n", "mn", "gc", "col", "xyz"])
+def test_validate_stats_region_rejects_unknown(value):
+    from utils.error_handling import validate_stats_region
+    with pytest.raises(HTTPException) as exc:
+        validate_stats_region(value)
+    assert exc.value.status_code == 400
+
+
+def test_rankings_region_americas_still_400():
+    """The shared /rankings region dict is untouched: 'americas' must still 400."""
+    with pytest.raises(HTTPException) as exc:
+        validate_region("americas")
+    assert exc.value.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Current vlr.gg filter contract
+# ---------------------------------------------------------------------------
+
+def test_normalize_stats_filters_preserves_legacy_defaults():
+    filters = normalize_stats_filters("na", "60")
+
+    assert filters.region == "americas"
+    assert filters.span == "60d"
+    assert filters.tier == "all"
+    assert filters.min_rounds == 200
+    assert filters.min_rating == 1550
+
+
+def test_normalize_stats_filters_accepts_current_custom_contract():
+    filters = normalize_stats_filters(
+        "emea",
+        span="custom",
+        from_date="2026-01-01",
+        to_date="2026-06-30",
+        tier="vct",
+        side="ct",
+        role="sentinel",
+        agent="Killjoy",
+        map_id="12",
+        min_rounds=100,
+        min_rating=0,
+        sort="kmax",
+        direction="asc",
+    )
+
+    assert filters.agent == "killjoy"
+    assert filters.upstream_query() == {
+        "sort": "kmax",
+        "dir": "asc",
+        "tier": "vct",
+        "region": "emea",
+        "span": "custom",
+        "side": "ct",
+        "role": "sentinel",
+        "agent": "killjoy",
+        "map_id": "12",
+        "min_rounds": 100,
+        "min_rating": 0,
+        "from": "2026-01-01",
+        "to": "2026-06-30",
+    }
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"span": "custom", "from_date": "2026-01-01"},
+        {"span": "custom", "from_date": "2026-07-02", "to_date": "2026-07-01"},
+        {"span": "60d", "from_date": "2026-01-01", "to_date": "2026-02-01"},
+        {"span": "2019"},
+        {"span": "never"},
+        {"span": "60d", "tier": "tier-one"},
+        {"span": "60d", "side": "attack"},
+        {"span": "60d", "role": "flex"},
+        {"span": "60d", "agent": "bad agent"},
+        {"span": "60d", "map_id": "split!"},
+        {"span": "60d", "min_rounds": 1000},
+        {"span": "60d", "min_rating": 1600},
+        {"span": "60d", "sort": "player"},
+        {"span": "60d", "direction": "sideways"},
+    ],
+)
+def test_normalize_stats_filters_rejects_invalid_contract(kwargs):
+    with pytest.raises(HTTPException) as exc:
+        normalize_stats_filters("americas", **kwargs)
+    assert exc.value.status_code == 400
+
+
+def test_normalize_stats_filters_rejects_conflicting_windows():
+    with pytest.raises(HTTPException) as exc:
+        normalize_stats_filters("americas", "30", span="60d")
+    assert exc.value.status_code == 400
+    assert "Conflicting" in exc.value.detail
+
+
+def test_filter_mismatches_checks_all_echoed_controls():
+    filters = normalize_stats_filters(
+        "americas",
+        span="60d",
+        tier="vct",
+        min_rounds=100,
+        min_rating=0,
+    )
+    html = HTMLParser(
+        '<input name="sort" value="rating">'
+        '<input name="dir" value="desc">'
+        '<select name="tier"><option value="all" selected>All</option></select>'
+        '<select name="region"><option value="americas" selected>Americas</option></select>'
+        '<select name="span"><option value="60d" selected>60 days</option></select>'
+        '<input name="min_rounds" value="100">'
+        '<select name="min_rating"><option value="0" selected>All</option></select>'
+    )
+
+    assert _filter_mismatches(html, filters) == {"tier": ("vct", "all")}
+
+
+@pytest.mark.anyio
+async def test_vlr_stats_uses_current_query_names_and_filter_cache_key(monkeypatch):
+    fetch = _install_fake_fetch(monkeypatch)
+
+    first = await vlr_stats(
+        "americas",
+        span="60d",
+        tier="vct",
+        agent="jett",
+        min_rounds=100,
+        min_rating=0,
+        sort="maps",
+        direction="asc",
+    )
+    data_url = next(call for call in fetch.calls if _region_of(call) is not None)
+
+    assert "span=60d" in data_url
+    assert "timespan=" not in data_url
+    assert "tier%5B%5D=vct" in data_url
+    assert "agent=jett" in data_url
+    assert "min_rounds=100" in data_url
+    assert "min_rating=0" in data_url
+    assert "sort=maps" in data_url
+    assert "dir=asc" in data_url
+    assert first["data"]["filters"]["tier"] == "vct"
+
+    before = len(fetch.calls)
+    await vlr_stats(
+        "americas",
+        span="60d",
+        tier="vct",
+        agent="jett",
+        min_rounds=100,
+        min_rating=0,
+        sort="maps",
+        direction="asc",
+    )
+    assert len(fetch.calls) == before
+
+    await vlr_stats(
+        "americas",
+        span="60d",
+        tier="gc",
+        agent="jett",
+        min_rounds=100,
+        min_rating=0,
+        sort="maps",
+        direction="asc",
+    )
+    assert len(fetch.calls) == before + 1
+
+
+# ---------------------------------------------------------------------------
+# Echo validation against the revamped form.st-filter (captured 2026-11-23)
+# ---------------------------------------------------------------------------
+
+LIVE_FORM = """
+<form class="st-filter" action="/stats" method="get">
+  <input type="hidden" name="sort" value="rating">
+  <input type="hidden" name="dir" value="desc">
+  <input type="checkbox" name="tier[]" value="vct">
+  <input type="checkbox" name="tier[]" value="vcl">
+  <input type="checkbox" name="region[]" value="americas">
+  <input type="checkbox" name="region[]" value="emea">
+  <input type="radio" name="span" value="custom">
+  <input type="hidden" name="from" value="">
+  <input type="hidden" name="to" value="">
+  <input type="radio" name="span" value="all">
+  <input type="radio" name="span" value="30d" checked>
+  <input type="radio" name="span" value="60d">
+  <input type="radio" name="side" value="all" checked>
+  <input type="checkbox" name="role[]" value="duelist">
+  <input type="checkbox" name="agent[]" value="jett">
+  <input type="checkbox" name="map_id[]" value="5">
+  <input type="text" name="min_rounds" value="200">
+  <input type="radio" name="min_rating" value="0">
+  <input type="radio" name="min_rating" value="1550" checked>
+</form>
+"""
+
+
+def test_current_form_echo_matches_the_legacy_default_request():
+    """The default /v2/stats?region=all&timespan=30 request validates cleanly.
+
+    Before the merge the fork compared ``rating2`` with the echoed ``rating`` and
+    read the first ``span`` radio (``custom``), so every request returned 502.
+    """
+    filters = normalize_stats_filters("all", "30")
+
+    assert filters.sort == "rating"
+    assert _filter_mismatches(HTMLParser(LIVE_FORM), filters) == {}
+
+
+def test_current_form_echo_detects_a_dropped_region():
+    filters = normalize_stats_filters("emea", "30")
+
+    assert _filter_mismatches(HTMLParser(LIVE_FORM), filters) == {
+        "region": ("emea", "all")
+    }
+
+
+def test_legacy_sort_names_are_accepted_and_normalised():
+    assert normalize_stats_filters("all", "30", sort="rating2").sort == "rating"
+    assert normalize_stats_filters("all", "30", sort="fbpr").sort == "fkpr"
+
+
+@pytest.mark.parametrize("value,expected", [(1550, 1550), (1.55, 1550), (0, 0), (1.3, 1300)])
+def test_min_rating_accepts_both_scales(value, expected):
+    assert normalize_stats_filters("all", "30", min_rating=value).min_rating == expected
+
+
+def test_map_name_and_map_id_must_agree():
+    assert normalize_stats_filters("all", "30", map_name="ascent").map_id == "5"
+    assert normalize_stats_filters("all", "30", map_name="ascent", map_id="5").map_id == "5"
+    with pytest.raises(HTTPException) as exc:
+        normalize_stats_filters("all", "30", map_name="ascent", map_id="1")
+    assert exc.value.status_code == 400

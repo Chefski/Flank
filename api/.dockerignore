@@ -1,0 +1,17 @@
+.git
+.venv
+__pycache__
+.pytest_cache
+.uv-cache
+.claude
+benchmarks
+deploy
+tasks
+.github
+tests
+README.md
+LICENSE
+docker-compose*.yml
+AGENTS.md
+pytest.ini
+.python-version

@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
+    # UV_PYTHON wins over .python-version, which would otherwise pin every
+    # matrix job to the project's single pinned interpreter.
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Lint with Ruff
+        run: uv run ruff check --output-format=github
+
+      - name: Audit dependencies
+        run: uv run pip-audit
+
+      - name: Run tests
+        run: uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=50
+
+  docker-smoke:
+    name: Docker smoke build
+    needs: test
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/container.yml
+    with:
+      push: false
+
+  publish:
+    name: Publish Docker image
+    needs: test
+    # Trunk-based: master is the only long-lived branch, so every push to it is
+    # a release and (re)tags :latest.
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/master'
+    uses: ./.github/workflows/container.yml
+    with:
+      push: true
+      image-tags: |
+        type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+    secrets:
+      GHCR_PAT: ${{ secrets.GHCR_PAT }}

@@ -1,0 +1,372 @@
+"""
+Common HTML parsing utilities for VLR.GG scrapers
+"""
+import re
+from datetime import UTC, datetime, timedelta
+from urllib.parse import urljoin, urlparse
+from zoneinfo import ZoneInfo
+
+from selectolax.lexbor import LexborHTMLParser
+from selectolax.lexbor import LexborHTMLParser as HTMLParser  # noqa: F401  re-exported for type hints
+
+
+def extract_text_content(element, strip: bool = True) -> str:
+    """Extract text content from an HTML element safely, collapsing internal whitespace."""
+    if not element:
+        return ""
+    text = element.text(strip=False)
+    collapsed = re.sub(r"\s+", " ", text)
+    return collapsed.strip() if strip else collapsed
+
+
+def extract_prize_value(prize_elem) -> str:
+    """
+    Extract prize value from VLR.GG prize elements.
+    Handles both monetary values ($250,000) and TBD cases.
+    """
+    if not prize_elem:
+        return ""
+
+    full_text = prize_elem.text(strip=True)
+
+    # Split before "Prize Pool" label to get just the value
+    parts = re.split(r'(?=Prize Pool|prize pool)', full_text, flags=re.IGNORECASE)
+    if not parts:
+        return ""
+
+    first_part = re.sub(r'\s+', ' ', parts[0].strip())
+
+    # Check for TBD
+    if first_part.upper() == "TBD":
+        return "TBD"
+    # Check for dollar amounts
+    elif re.match(r'^\$[\d,]+$', first_part):
+        return first_part
+    # Check for numeric values (add $ if missing)
+    elif re.match(r'^[\d,]+$', first_part) and len(first_part) > 2:
+        return "$" + first_part
+
+    return ""
+
+
+def extract_date_range(dates_elem) -> str:
+    """
+    Extract date range from VLR.GG date elements.
+    Handles patterns like "Jul 15—Aug 31" and "Sep 15—TBD"
+    """
+    if not dates_elem:
+        return ""
+
+    full_text = dates_elem.text(strip=True)
+
+    # Try to find date patterns first
+    date_match = re.search(r"[A-Za-z]{3}\s+\d+[—\-–]+[A-Za-z]*\s*\d+", full_text)
+    if date_match:
+        return date_match.group()
+
+    # Check for TBD in dates or fallback parsing
+    if re.search(r"\bTBD\b", full_text, re.IGNORECASE):
+        return "TBD"
+
+    # Fallback: look for month abbreviations
+    lines = full_text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line or any(keyword in line.lower() for keyword in ['dates', 'label', 'prize', 'pool']):
+            continue
+
+        if (any(month in line for month in ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']) or
+            '\u2014' in line):
+            return line
+
+    return ""
+
+
+def extract_region_from_flag(flag_elem) -> str:
+    """Extract region code from flag element class attribute"""
+    if not flag_elem:
+        return ""
+
+    class_attr = flag_elem.attributes.get("class", "")
+    return class_attr.replace("flag mod-", "").strip()
+
+
+def normalize_image_url(src: str, base_url: str = "https://www.vlr.gg") -> str:
+    """Normalize image URLs to absolute URLs"""
+    if not src:
+        return ""
+
+    if src.startswith("//"):
+        return "https:" + src
+    elif src.startswith("/"):
+        return base_url + src
+    else:
+        return src
+
+
+def add_image_variants(
+    item: dict,
+    dark_item: dict | None = None,
+    field: str = "logo",
+) -> dict:
+    """Add light/dark image fields while preserving the legacy field.
+
+    The original field remains the light/default asset. Missing dark assets
+    fall back to the light URL so clients can select by appearance without
+    adding their own fallback logic.
+    """
+    light_value = item.get(field, "")
+    dark_value = dark_item.get(field, "") if dark_item else ""
+    item[f"{field}_light"] = light_value
+    item[f"{field}_dark"] = dark_value or light_value
+    return item
+
+
+def build_full_url(href: str, base_url: str = "https://www.vlr.gg") -> str:
+    """Build full URL from relative href"""
+    if not href:
+        return ""
+    return urljoin(f"{base_url.rstrip('/')}/", href)
+
+
+def extract_match_teams(item, selector: str = ".h-match-team") -> tuple[dict, dict]:
+    """
+    Extract team info from a match item.
+    Returns (team1_dict, team2_dict) each with name, flag, score.
+    """
+    teams = []
+    for team_elem in item.css(selector):
+        name_elem = team_elem.css_first(
+            ".h-match-team-name"
+        ) or team_elem.css_first(
+            ".match-item-vs-team-name"
+        )
+        name = name_elem.text().strip() if name_elem else "TBD"
+
+        flag_elem = team_elem.css_first(".flag")
+        flag = ""
+        if flag_elem:
+            flag_class = flag_elem.attributes.get("class", "")
+            flag = flag_class.replace(" mod-", "").replace("16", "_")
+            flag = flag.replace("flag ", "") if flag.startswith("flag ") else flag
+
+        score_elem = team_elem.css_first(
+            ".h-match-team-score"
+        ) or team_elem.css_first(
+            ".match-item-vs-team-score"
+        )
+        score = score_elem.text().strip() if score_elem else ""
+
+        teams.append({"name": name, "flag": flag, "score": score})
+
+    pad_to_length(teams, 2, lambda: {"name": "TBD", "flag": "", "score": ""})
+
+    return teams[0], teams[1]
+
+
+# --- Timestamp parsing helpers ---
+
+def parse_eta_to_timedelta(eta_text: str) -> timedelta | None:
+    """Parse '4h 1m' / '1d 2h' / '30m' into timedelta. Returns None for LIVE/ago/unparseable."""
+    if not eta_text:
+        return None
+    eta_text = eta_text.strip()
+    if not eta_text or "LIVE" in eta_text.upper() or "ago" in eta_text.lower():
+        return None
+    pattern = re.findall(r"(\d+)\s*([dhm])", eta_text.lower())
+    if not pattern:
+        return None
+    total = timedelta()
+    for value, unit in pattern:
+        value = int(value)
+        if unit == "d":
+            total += timedelta(days=value)
+        elif unit == "h":
+            total += timedelta(hours=value)
+        elif unit == "m":
+            total += timedelta(minutes=value)
+    return total if total > timedelta() else None
+
+
+def parse_local_datetime(date_str: str, time_text: str, today=None) -> datetime | None:
+    """Parse 'Mon, February 9, 2026' + '4:00 AM' into a naive datetime.
+
+    The result carries no timezone: VLR renders these in the viewer's zone.
+    'Today' / 'Tomorrow' resolve against ``today`` (a date) when given.
+    Returns None on failure.
+    """
+    if not date_str or not time_text:
+        return None
+    time_text = time_text.strip()
+    if not time_text or time_text.upper() in ("TBD", "LIVE", "-"):
+        return None
+
+    # Clean up date_str: remove day-of-week prefix like "Mon, "
+    cleaned_date = re.sub(r"^[A-Za-z]+,\s*", "", date_str.strip())
+    # Handle "Today" / "Tomorrow" by skipping date parse
+    if cleaned_date.lower() in ("today", "tomorrow"):
+        if today is None:
+            return None
+        day = today + timedelta(days=1) if cleaned_date.lower() == "tomorrow" else today
+        cleaned_date = day.strftime("%B %d, %Y")
+
+    # Parse time: "4:00 AM" or "16:00"
+    parsed_time = None
+    for fmt in ("%I:%M %p", "%H:%M"):
+        try:
+            parsed_time = datetime.strptime(time_text, fmt).time()
+            break
+        except ValueError:
+            continue
+    if parsed_time is None:
+        return None
+
+    # Parse date: "February 9, 2026"
+    parsed_date = None
+    for fmt in ("%B %d, %Y", "%b %d, %Y"):
+        try:
+            parsed_date = datetime.strptime(cleaned_date, fmt).date()
+            break
+        except ValueError:
+            continue
+    if parsed_date is None:
+        return None
+
+    return datetime.combine(parsed_date, parsed_time)
+
+
+def combine_date_and_time(date_str: str, time_text: str) -> str:
+    """Parse 'Mon, February 9, 2026' + '4:00 AM' -> UTC timestamp string.
+
+    Interprets times as US Eastern. Returns '' on failure.
+    """
+    eastern = ZoneInfo("America/New_York")
+    local_dt = parse_local_datetime(date_str, time_text, today=datetime.now(eastern).date())
+    if local_dt is None:
+        return ""
+    utc_dt = local_dt.replace(tzinfo=eastern).astimezone(UTC)
+    return utc_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def parse_match_timestamp(item, date_str: str) -> str:
+    """Multi-strategy timestamp extraction for a match item.
+
+    1. .moment-tz-convert[data-utc-ts]: unix, or Eastern string -> UTC
+    2. .ml-eta countdown -> utcnow() + delta
+    3. date header + .match-item-time -> Eastern -> UTC
+    4. '' if all fail
+    """
+    # Strategy 1: timestamp attribute. vlr.gg renders data-utc-ts in two
+    # forms: a unix number (homepage, e.g. "1790845200") and, on match pages,
+    # a US Eastern "YYYY-MM-DD HH:MM:SS" string despite the attribute's name
+    # ("2026-07-16 20:20:00" is shown as "2:20 AM CEST").
+    ts_elem = item.css_first(".moment-tz-convert")
+    if ts_elem:
+        raw_ts = (ts_elem.attributes.get("data-utc-ts") or "").strip()
+        try:
+            if raw_ts.isdigit():
+                utc_dt = datetime.fromtimestamp(int(raw_ts), tz=UTC)
+            else:
+                local_dt = datetime.strptime(raw_ts, "%Y-%m-%d %H:%M:%S")
+                utc_dt = local_dt.replace(tzinfo=ZoneInfo("America/New_York")).astimezone(UTC)
+            return utc_dt.strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, OSError):
+            pass
+
+    # Strategy 2: ETA countdown
+    eta_elem = item.css_first(".ml-eta")
+    if eta_elem:
+        delta = parse_eta_to_timedelta(eta_elem.text())
+        if delta is not None:
+            utc_dt = datetime.now(UTC) + delta
+            return utc_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Strategy 3: date header + match time
+    time_elem = item.css_first(".match-item-time")
+    if time_elem:
+        time_text = time_elem.text().strip()
+        result = combine_date_and_time(date_str, time_text)
+        if result:
+            return result
+
+    return ""
+
+
+# --- Shared helpers for new scrapers ---
+
+def parse_href_id_slug(href: str) -> tuple[str, str]:
+    """Extract numeric ID and slug from VLR hrefs like '/player/1234/tenz'.
+
+    Returns (id, slug). Either may be '' if not found.
+    """
+    if not href:
+        return "", ""
+    parts = href.strip("/").split("/")
+    for i, part in enumerate(parts):
+        if part.isdigit():
+            slug = parts[i + 1] if i + 1 < len(parts) else ""
+            return part, slug
+    return "", ""
+
+
+_PLATFORM_PATTERNS = {
+    "twitter": ("twitter.com", "x.com"),
+    "twitch": ("twitch.tv",),
+    "instagram": ("instagram.com",),
+    "youtube": ("youtube.com", "youtu.be"),
+    "discord": ("discord.gg", "discord.com"),
+    "facebook": ("facebook.com",),
+    "vk": ("vk.com",),
+}
+
+
+def infer_platform(url: str) -> str:
+    """Detect social platform from URL. Returns lowercase name or 'other'."""
+    if not url:
+        return "other"
+    host = urlparse(url).netloc.lower().lstrip("www.")
+    for platform, domains in _PLATFORM_PATTERNS.items():
+        if any(d in host for d in domains):
+            return platform
+    return "other"
+
+
+_STRIP_RE = re.compile(
+    r'<(script|style)[^>]*>.*?</\1>|<!--.*?-->',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def strip_html(html: str) -> str:
+    """Remove scripts, styles, and HTML comments."""
+    return _STRIP_RE.sub("", html)
+
+
+def parse_html(html: str):
+    """Strip noise from HTML then parse with selectolax (lexbor backend)."""
+    return LexborHTMLParser(strip_html(html))
+
+
+def find_elements_by_selectors(html, selectors) -> list:
+    """Return the first non-empty ``html.css(selector)`` result from *selectors*.
+
+    vlr.gg ships markup changes unevenly, so several scrapers try selectors in
+    order and use whichever still matches. Returns ``[]`` when none match.
+    """
+    for selector in selectors:
+        elements = html.css(selector)
+        if elements:
+            return elements
+    return []
+
+
+def pad_to_length(items: list, length: int, factory) -> list:
+    """Grow *items* in place to *length*, building each filler via *factory*.
+
+    ``factory`` is called per filler so padded entries never alias each other.
+    Lists already at or beyond *length* are left untouched. Returns *items*.
+    """
+    while len(items) < length:
+        items.append(factory())
+    return items
