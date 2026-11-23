@@ -6,12 +6,14 @@
 import FluidGradient
 import SwiftUI
 
+/// Live match card: the shared match card layout on an always-dark surface that
+/// slowly blends both teams' colours.
 struct LiveMatchTab: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let match: V3Match
 
-    private static let firstFallback = Color(red: 0.35, green: 0.35, blue: 0.35)
-    private static let secondFallback = Color(red: 0.08, green: 0.08, blue: 0.1)
+    private static let firstFallback = Color(red: 0.35, green: 0.35, blue: 0.38)
+    private static let secondFallback = Color(red: 0.16, green: 0.16, blue: 0.2)
 
     @State private var firstTeamColor: Color
     @State private var secondTeamColor: Color
@@ -41,85 +43,31 @@ struct LiveMatchTab: View {
         NavigationLink {
             MatchDetailView(match: match)
         } label: {
-            VStack(spacing: 0) {
-                ZStack {
-                    FluidGradient(
-                        blobs: [firstTeamColor, secondTeamColor],
-                        highlights: [firstTeamColor, secondTeamColor, secondTeamColor, firstTeamColor],
-                        speed: reduceMotion ? 0 : 1,
-                        blur: 0.75
-                    )
-                    .background(Color(red: 0.12, green: 0.12, blue: 0.13))
-                    .opacity(0.78)
-
-                    HStack(spacing: 12) {
-                        MatchTeamSummary(
-                            team: match.firstTeam,
-                            logoSize: 58,
-                            matchID: match.id,
-                            teamPosition: 0
-                        )
-
-                        VStack(spacing: 5) {
-                            Text(scoreText)
-                                .font(.headline.weight(.bold))
-                                .monospacedDigit()
-                            Text(match.statusText ?? "LIVE")
-                                .font(.caption2.weight(.bold))
-                                .textCase(.uppercase)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 4)
-                                .background(.white.opacity(0.25), in: Capsule())
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-
-                        MatchTeamSummary(
-                            team: match.secondTeam,
-                            logoSize: 58,
-                            matchID: match.id,
-                            teamPosition: 1
-                        )
+            MatchCardLayout(match: match) {
+                LiveBadge()
+            } center: {
+                VStack(spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(score(match.firstTeam))
+                        Text("–")
+                            .foregroundStyle(.tertiary)
+                        Text(score(match.secondTeam))
                     }
-                    .padding(.horizontal, 14)
-                }
-                .frame(minHeight: 138)
+                    .font(.system(.title, design: .rounded, weight: .bold))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
 
-                HStack(spacing: 12) {
-                    eventLogo
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(match.event.name)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(2)
-                        if !eventDetail.isEmpty {
-                            Text(eventDetail)
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.72))
-                                .lineLimit(2)
-                        }
+                    if let progress {
+                        Text(progress)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
-
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.72))
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .glassEffect(
-                    .regular.tint(.black.opacity(0.18)),
-                    in: .rect(cornerRadius: 0)
-                )
             }
-            .foregroundStyle(.white)
-            .background(Color(red: 0.12, green: 0.12, blue: 0.13))
-            .clipShape(.rect(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous)
-                    .strokeBorder(.white.opacity(0.14), lineWidth: 1)
-            }
-            .contentShape(.rect(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous))
-            // The live card is always dark, so logos must resolve their dark variants.
+            .background { surface }
+            .matchCardChrome(strokeOpacity: 0.12)
+            // The live card is always dark, so text and logos resolve their dark variants.
             .environment(\.colorScheme, .dark)
         }
         .buttonStyle(MatchCardButtonStyle())
@@ -141,27 +89,42 @@ struct LiveMatchTab: View {
         }
     }
 
-    private var eventLogo: some View {
-        AsyncImage(url: VLRAPI.imageURL(from: match.event.image.preferred(for: .dark))) { image in
-            image.resizable().scaledToFit()
-        } placeholder: {
-            Image(systemName: "trophy.fill")
-                .foregroundStyle(.white.opacity(0.55))
+    private var surface: some View {
+        ZStack {
+            Color(red: 0.07, green: 0.07, blue: 0.08)
+
+            FluidGradient(
+                blobs: [firstTeamColor, secondTeamColor],
+                highlights: [firstTeamColor, secondTeamColor, secondTeamColor, firstTeamColor],
+                speed: reduceMotion ? 0 : 0.6,
+                blur: 0.8
+            )
+            .opacity(0.6)
+
+            // Settles the bottom so the team names stay crisp over bright logo colours.
+            LinearGradient(
+                colors: [.black.opacity(0), .black.opacity(0.35)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
         }
-        .frame(width: 34, height: 34)
-        .accessibilityHidden(true)
     }
 
-    private var scoreText: String {
-        "\(match.firstTeam?.score.map(String.init) ?? "–") - \(match.secondTeam?.score.map(String.init) ?? "–")"
+    private func score(_ team: V3TeamRef?) -> String {
+        team?.score.map(String.init) ?? "–"
     }
 
-    private var eventDetail: String {
-        [match.event.stage, match.event.series].compactMap { $0 }.joined(separator: " · ")
+    /// Extra progress from the API (e.g. the current map), skipping the bare "LIVE"
+    /// that the badge already shows.
+    private var progress: String? {
+        guard let text = match.statusText?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty,
+              text.caseInsensitiveCompare("live") != .orderedSame else { return nil }
+        return text
     }
 
     private var accessibilityLabel: String {
-        "Live, \(match.firstTeam?.name ?? "team one") versus \(match.secondTeam?.name ?? "team two"), score \(scoreText), \(match.event.name)"
+        "Live, \(match.firstTeam?.name ?? "team one") versus \(match.secondTeam?.name ?? "team two"), score \(score(match.firstTeam)) to \(score(match.secondTeam)), \(match.event.name)"
     }
 
     private static func cardColor(_ colors: LogoColors?, fallback: Color) -> Color {

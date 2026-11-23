@@ -83,9 +83,8 @@ struct UpcomingMatchTab: View {
     }
 }
 
-/// Shared layout for the Upcoming and Results list cards: an event header with a
-/// trailing accessory, then both teams either side of a centre slot (kick-off time
-/// or final score), on a surface softly tinted with the event's brand colour.
+/// The Upcoming and Results list card: `MatchCardLayout` on an adaptive surface softly
+/// tinted with the event's brand colour.
 struct MatchListCard<Accessory: View, Center: View>: View {
     let match: V3Match
     let accessibilityLabel: String
@@ -128,25 +127,14 @@ struct MatchListCard<Accessory: View, Center: View>: View {
         NavigationLink {
             MatchDetailView(match: match)
         } label: {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-
-                HStack(alignment: .center, spacing: 6) {
-                    team(match.firstTeam, position: 0)
-                    center()
-                        .frame(minWidth: 88)
-                    team(match.secondTeam, position: 1)
-                }
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            MatchCardLayout(
+                match: match,
+                dimmedTeamPosition: dimmedTeamPosition,
+                accessory: accessory,
+                center: center
+            )
             .background { surface }
-            .clipShape(.rect(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05), lineWidth: 1)
-            }
-            .contentShape(.rect(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous))
+            .matchCardChrome(strokeOpacity: colorScheme == .dark ? 0.08 : 0.05)
         }
         .buttonStyle(MatchCardButtonStyle())
         .accessibilityElement(children: .combine)
@@ -159,6 +147,45 @@ struct MatchListCard<Accessory: View, Center: View>: View {
                 accent = color
             }
         }
+    }
+
+    private var surface: some View {
+        ZStack {
+            Color(.secondarySystemBackground)
+            if let accent {
+                LinearGradient(
+                    colors: [accent.opacity(colorScheme == .dark ? 0.3 : 0.16), accent.opacity(0)],
+                    startPoint: .topLeading,
+                    endPoint: UnitPoint(x: 0.75, y: 1)
+                )
+            }
+        }
+    }
+}
+
+/// The content every match card shares, without any surface: an event header with a
+/// trailing accessory, then both teams either side of a centre slot.
+struct MatchCardLayout<Accessory: View, Center: View>: View {
+    let match: V3Match
+    var dimmedTeamPosition: Int?
+    let accessory: () -> Accessory
+    let center: () -> Center
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            header
+
+            HStack(alignment: .center, spacing: 6) {
+                team(match.firstTeam, position: 0)
+                center()
+                    .frame(minWidth: 88)
+                team(match.secondTeam, position: 1)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var header: some View {
@@ -213,21 +240,42 @@ struct MatchListCard<Accessory: View, Center: View>: View {
         .opacity(dimmedTeamPosition == position ? 0.45 : 1)
     }
 
-    private var surface: some View {
-        ZStack {
-            Color(.secondarySystemBackground)
-            if let accent {
-                LinearGradient(
-                    colors: [accent.opacity(colorScheme == .dark ? 0.3 : 0.16), accent.opacity(0)],
-                    startPoint: .topLeading,
-                    endPoint: UnitPoint(x: 0.75, y: 1)
-                )
-            }
-        }
-    }
-
     private var eventDetail: String {
         [match.event.stage, match.event.series].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
+/// Red "LIVE" capsule with a softly pulsing dot, shared by the live card and match hero.
+struct LiveBadge: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 6))
+                .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
+                .accessibilityHidden(true)
+            Text("Live")
+                .textCase(.uppercase)
+                .kerning(0.6)
+        }
+        .font(.caption.weight(.bold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Color.red, in: Capsule())
+    }
+}
+
+extension View {
+    /// Rounded, hairline-outlined card shape shared by all match cards.
+    func matchCardChrome(strokeOpacity: Double) -> some View {
+        clipShape(.rect(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(strokeOpacity), lineWidth: 1)
+            }
+            .contentShape(.rect(cornerRadius: MatchCardMetrics.cornerRadius, style: .continuous))
     }
 }
 
@@ -270,39 +318,6 @@ func countryFlag(_ code: String?) -> String? {
     }
     guard scalars.count == 2 else { return nil }
     return String(String.UnicodeScalarView(scalars))
-}
-
-struct MatchTeamSummary: View {
-    let team: V3TeamRef?
-    let logoSize: CGFloat
-    let matchID: Int?
-    let teamPosition: Int
-
-    var body: some View {
-        VStack(spacing: 7) {
-            MatchTeamLogo(
-                team: team,
-                matchID: matchID,
-                teamPosition: teamPosition,
-                size: logoSize
-            )
-
-            HStack(spacing: 4) {
-                Text(team?.name ?? "Team unavailable")
-                    .font(.caption.weight(.bold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.75)
-                    .multilineTextAlignment(.center)
-                if team?.isWinner == true {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(.green)
-                        .accessibilityLabel("Winner")
-                }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .foregroundStyle(.white)
-    }
 }
 
 struct MatchTeamLogo: View {
